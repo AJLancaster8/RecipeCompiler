@@ -114,17 +114,33 @@ export default function CompiledScreen() {
     return `${parts.slice(0, -1).join(", ")}, and ${parts[parts.length - 1]}`;
   };
 
-  // Builds one shared timeline: within each recipe, a step's "offset" is
-  // the total time of every step before it in that same recipe. Steps
-  // from every selected recipe are merged and sorted by that offset. Each
-  // step also carries its own resolved ingredient list (name/amount/unit,
-  // looked up from the recipe's ingredientIds), so both the timeline here
-  // and the saved plan later can show exactly what that step uses.
+  // Builds one shared timeline, aligned so every recipe's LAST step
+  // finishes at the same moment (e.g. a side dish and a main course
+  // should both be ready together) — rather than all recipes starting
+  // together. To do this: find the longest total recipe duration, then
+  // give every shorter recipe a start delay equal to the difference, so
+  // it still finishes exactly when the longest one does. Within a
+  // recipe, a step's "offset" is its start delay plus the total time of
+  // every step before it in that same recipe. Steps from every selected
+  // recipe are then merged and sorted by that offset. Each step also
+  // carries its own resolved ingredient list (name/amount/unit, looked up
+  // from the recipe's ingredientIds), so both the timeline here and the
+  // saved plan later can show exactly what that step uses.
   const timeline = useMemo(() => {
+    const recipeTotals = selectedRecipes.map((r) =>
+      r.steps.reduce(
+        (sum: number, s: any) =>
+          sum + (s.timeValue || 0) * unitToSeconds(s.timeUnit),
+        0,
+      ),
+    );
+    const maxTotal = recipeTotals.length > 0 ? Math.max(...recipeTotals) : 0;
+
     const items: TimelineItem[] = [];
 
-    selectedRecipes.forEach((r) => {
-      let cumulative = 0;
+    selectedRecipes.forEach((r, recipeIndex) => {
+      const startDelay = maxTotal - recipeTotals[recipeIndex];
+      let cumulative = startDelay;
       r.steps.forEach((s: any) => {
         const durationSeconds = (s.timeValue || 0) * unitToSeconds(s.timeUnit);
         const stepIngredients: PlanStepIngredient[] = (s.ingredientIds || [])
@@ -223,7 +239,7 @@ export default function CompiledScreen() {
 
         <Text style={styles.sectionTitle}>Timeline</Text>
         <Text style={styles.timelineHint}>
-          Assumes all recipes are started at the same time.
+          Timed so every recipe's last step finishes at the same time.
         </Text>
         {timeline.length === 0 ? (
           <Text style={styles.emptyText}>No steps found.</Text>
