@@ -16,6 +16,7 @@ import {
     scheduleStepNotification,
 } from "./notifications";
 import { ActiveStep, PlanStep, usePlans } from "./plan-store";
+import { getRecipeColor } from "./recipe-colors";
 
 // Formats a countdown as m:ss (or h:mm:ss once past an hour)
 function formatCountdown(totalSeconds: number): string {
@@ -220,11 +221,16 @@ export default function PlanScreen() {
               ? (active.timerEndAt - Date.now()) / 1000
               : null;
           const timerDone = remainingSeconds !== null && remainingSeconds <= 0;
+          const color = getRecipeColor(step.recipeId, plan.recipeIds);
 
           return (
             <View
               key={step.id}
-              style={[styles.stepCard, isActive && styles.stepCardActive]}
+              style={[
+                styles.stepCard,
+                { borderLeftColor: color },
+                isActive && styles.stepCardActive,
+              ]}
             >
               <View style={styles.stepTopRow}>
                 <View style={styles.offsetBadge}>
@@ -233,7 +239,9 @@ export default function PlanScreen() {
                   </Text>
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.recipeTag}>{step.recipeName}</Text>
+                  <Text style={[styles.recipeTag, { color }]}>
+                    {step.recipeName}
+                  </Text>
                   <Text style={styles.stepText}>{step.text}</Text>
                   {step.description ? (
                     <Text style={styles.stepDescription}>
@@ -361,6 +369,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: "#E0D5C7",
+    borderLeftWidth: 5,
     borderRadius: 12,
     padding: 14,
     marginBottom: 12,

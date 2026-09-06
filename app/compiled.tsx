@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Plan, PlanStep, PlanStepIngredient, usePlans } from "./plan-store";
+import { getRecipeColor } from "./recipe-colors";
 import { nextId, useRecipes } from "./recipe-store";
 
 // Converts a step's time unit into seconds so different-unit steps
@@ -67,6 +68,13 @@ export default function CompiledScreen() {
     [selectedRecipes],
   );
   const effectivePlanName = planName.trim().length > 0 ? planName : defaultName;
+
+  // Selection order, reused both for saving the plan and for assigning
+  // each recipe a consistent color throughout this screen.
+  const recipeIds = useMemo(
+    () => selectedRecipes.map((r) => r.id),
+    [selectedRecipes],
+  );
 
   // Groups ingredients by name, summing amounts that share the same unit
   // and listing different units side by side on that ingredient's one
@@ -186,7 +194,7 @@ export default function CompiledScreen() {
       const plan: Plan = {
         id: nextId(),
         name: effectivePlanName,
-        recipeIds: selectedRecipes.map((r) => r.id),
+        recipeIds: recipeIds,
         ingredients: combinedIngredients.map((ing) => ({
           ...ing,
           checked: false,
@@ -244,29 +252,37 @@ export default function CompiledScreen() {
         {timeline.length === 0 ? (
           <Text style={styles.emptyText}>No steps found.</Text>
         ) : (
-          timeline.map((step, idx) => (
-            <View key={idx} style={styles.timelineRow}>
-              <View style={styles.timelineOffsetBadge}>
-                <Text style={styles.timelineOffsetText}>
-                  {formatSeconds(step.offsetSeconds)}
-                </Text>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.timelineRecipeTag}>{step.recipeName}</Text>
-                <Text style={styles.timelineText}>{step.text}</Text>
-                {step.description ? (
-                  <Text style={styles.timelineDescription}>
-                    {step.description}
+          timeline.map((step, idx) => {
+            const color = getRecipeColor(step.recipeId, recipeIds);
+            return (
+              <View
+                key={idx}
+                style={[styles.timelineRow, { borderLeftColor: color }]}
+              >
+                <View style={styles.timelineOffsetBadge}>
+                  <Text style={styles.timelineOffsetText}>
+                    {formatSeconds(step.offsetSeconds)}
                   </Text>
-                ) : null}
-                {step.ingredients.length > 0 && (
-                  <Text style={styles.timelineIngredients}>
-                    Uses: {step.ingredients.map((i) => i.name).join(", ")}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.timelineRecipeTag, { color }]}>
+                    {step.recipeName}
                   </Text>
-                )}
+                  <Text style={styles.timelineText}>{step.text}</Text>
+                  {step.description ? (
+                    <Text style={styles.timelineDescription}>
+                      {step.description}
+                    </Text>
+                  ) : null}
+                  {step.ingredients.length > 0 && (
+                    <Text style={styles.timelineIngredients}>
+                      Uses: {step.ingredients.map((i) => i.name).join(", ")}
+                    </Text>
+                  )}
+                </View>
               </View>
-            </View>
-          ))
+            );
+          })
         )}
 
         <TouchableOpacity
@@ -336,6 +352,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-start",
     marginBottom: 14,
+    borderLeftWidth: 4,
+    paddingLeft: 10,
   },
   timelineOffsetBadge: {
     backgroundColor: "#D97B4F",
