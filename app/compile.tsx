@@ -15,9 +15,21 @@ export default function CompileScreen() {
   const router = useRouter();
   const { recipes } = useRecipes();
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [appetizerIds, setAppetizerIds] = useState<number[]>([]);
 
   const toggle = (id: number) => {
-    setSelectedIds((prev) =>
+    setSelectedIds((prev) => {
+      const nowSelected = !prev.includes(id);
+      if (!nowSelected) {
+        // Deselecting a recipe also clears its appetizer mark
+        setAppetizerIds((a) => a.filter((x) => x !== id));
+      }
+      return nowSelected ? [...prev, id] : prev.filter((x) => x !== id);
+    });
+  };
+
+  const toggleAppetizer = (id: number) => {
+    setAppetizerIds((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
     );
   };
@@ -30,7 +42,9 @@ export default function CompileScreen() {
       );
       return;
     }
-    router.push(`/compiled?ids=${selectedIds.join(",")}`);
+    const appetizersParam =
+      appetizerIds.length > 0 ? `&appetizers=${appetizerIds.join(",")}` : "";
+    router.push(`/compiled?ids=${selectedIds.join(",")}${appetizersParam}`);
   };
 
   return (
@@ -38,6 +52,8 @@ export default function CompileScreen() {
       <View style={styles.container}>
         <Text style={styles.subheader}>
           Choose two or more recipes to combine their ingredients and steps.
+          Mark any as an appetizer to have it finish as soon as possible,
+          instead of finishing alongside the rest.
         </Text>
 
         <ScrollView
@@ -51,25 +67,51 @@ export default function CompileScreen() {
           ) : (
             recipes.map((r) => {
               const selected = selectedIds.includes(r.id);
+              const isAppetizer = appetizerIds.includes(r.id);
               return (
-                <TouchableOpacity
+                <View
                   key={r.id}
                   style={[
                     styles.recipeOption,
                     selected && styles.recipeOptionSelected,
                   ]}
-                  onPress={() => toggle(r.id)}
                 >
-                  <View
-                    style={[
-                      styles.checkbox,
-                      selected && styles.checkboxChecked,
-                    ]}
+                  <TouchableOpacity
+                    style={styles.recipeMainRow}
+                    onPress={() => toggle(r.id)}
                   >
-                    {selected && <Text style={styles.checkmark}>✓</Text>}
-                  </View>
-                  <Text style={styles.recipeOptionText}>{r.name}</Text>
-                </TouchableOpacity>
+                    <View
+                      style={[
+                        styles.checkbox,
+                        selected && styles.checkboxChecked,
+                      ]}
+                    >
+                      {selected && <Text style={styles.checkmark}>✓</Text>}
+                    </View>
+                    <Text style={styles.recipeOptionText}>{r.name}</Text>
+                  </TouchableOpacity>
+
+                  {selected && (
+                    <TouchableOpacity
+                      style={styles.appetizerRow}
+                      onPress={() => toggleAppetizer(r.id)}
+                    >
+                      <View
+                        style={[
+                          styles.checkboxSmall,
+                          isAppetizer && styles.checkboxChecked,
+                        ]}
+                      >
+                        {isAppetizer && (
+                          <Text style={styles.checkmarkSmall}>✓</Text>
+                        )}
+                      </View>
+                      <Text style={styles.appetizerText}>
+                        Appetizer (finish ASAP)
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
               );
             })
           )}
@@ -116,8 +158,6 @@ const styles = StyleSheet.create({
     marginTop: 40,
   },
   recipeOption: {
-    flexDirection: "row",
-    alignItems: "center",
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
     borderColor: "#E0D5C7",
@@ -125,6 +165,16 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 16,
     marginBottom: 10,
+  },
+  recipeMainRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  appetizerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 10,
+    marginLeft: 34,
   },
   recipeOptionSelected: {
     borderColor: "#D97B4F",
@@ -140,6 +190,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  checkboxSmall: {
+    width: 18,
+    height: 18,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    borderColor: "#D9CFC3",
+    marginRight: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
+  },
   checkboxChecked: {
     backgroundColor: "#D97B4F",
     borderColor: "#D97B4F",
@@ -149,9 +210,19 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
   },
+  checkmarkSmall: {
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: "700",
+  },
   recipeOptionText: {
     fontSize: 16,
     color: "#2B2118",
+    fontWeight: "600",
+  },
+  appetizerText: {
+    fontSize: 13,
+    color: "#8A5A2E",
     fontWeight: "600",
   },
   compileButton: {

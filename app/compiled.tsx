@@ -22,15 +22,14 @@ function unitToSeconds(unit: "s" | "m" | "h"): number {
   return 3600;
 }
 
-// Turns a raw second count back into a friendly label like "5m" or "1.5h"
-function formatSeconds(totalSeconds: number): string {
-  if (totalSeconds < 60) return `${Math.round(totalSeconds)}s`;
-  if (totalSeconds < 3600) {
-    const m = totalSeconds / 60;
-    return `${Number.isInteger(m) ? m : m.toFixed(1)}m`;
-  }
-  const h = totalSeconds / 3600;
-  return `${Number.isInteger(h) ? h : h.toFixed(1)}h`;
+// Formats a Date's time-of-day as 12-hour with AM/PM, e.g. "6:30:00 PM"
+function formatClockTime(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  let hours = date.getHours();
+  const meridiem = hours >= 12 ? "PM" : "AM";
+  hours = hours % 12;
+  if (hours === 0) hours = 12;
+  return `${hours}:${pad(date.getMinutes())}:${pad(date.getSeconds())} ${meridiem}`;
 }
 
 type TimelineItem = {
@@ -41,6 +40,7 @@ type TimelineItem = {
   offsetSeconds: number;
   durationSeconds: number;
   ingredients: PlanStepIngredient[];
+  isAppetizer: boolean;
 };
 
 type CombinedIngredient = {
@@ -49,11 +49,19 @@ type CombinedIngredient = {
 };
 
 export default function CompiledScreen() {
-  const { ids } = useLocalSearchParams<{ ids?: string }>();
+  const { ids, appetizers } = useLocalSearchParams<{
+    ids?: string;
+    appetizers?: string;
+  }>();
   const router = useRouter();
   const { recipes } = useRecipes();
   const { addPlan } = usePlans();
   const [saving, setSaving] = useState(false);
+
+  const appetizerRecipeIds = useMemo(() => {
+    if (!appetizers) return [] as number[];
+    return appetizers.split(",").map((x) => Number(x));
+  }, [appetizers]);
 
   const selectedRecipes = useMemo(() => {
     if (!ids) return [];
@@ -62,6 +70,13 @@ export default function CompiledScreen() {
   }, [ids, recipes]);
 
   const [planName, setPlanName] = useState("");
+  const [endTimeDigits, setEndTimeDigits] = useState(""); // up to 4 raw digits, e.g. "0630"
+  const [endTimeMeridiem, setEndTimeMeridiem] = useState<"AM" | "PM">("PM");
+
+  // Captured once when this screen loads, so "start immediately" has a
+  // stable reference point rather than drifting to a new "now" on every
+  // render.
+  const [generatedAt] = useState(() => new Date());
 
   const defaultName = useMemo(
     () => selectedRecipes.map((r) => r.name).join(" + "),
@@ -122,33 +137,44 @@ export default function CompiledScreen() {
     return `${parts.slice(0, -1).join(", ")}, and ${parts[parts.length - 1]}`;
   };
 
-  // Builds one shared timeline, aligned so every recipe's LAST step
-  // finishes at the same moment (e.g. a side dish and a main course
-  // should both be ready together) — rather than all recipes starting
-  // together. To do this: find the longest total recipe duration, then
-  // give every shorter recipe a start delay equal to the difference, so
-  // it still finishes exactly when the longest one does. Within a
-  // recipe, a step's "offset" is its start delay plus the total time of
-  // every step before it in that same recipe. Steps from every selected
-  // recipe are then merged and sorted by that offset. Each step also
-  // carries its own resolved ingredient list (name/amount/unit, looked up
-  // from the recipe's ingredientIds), so both the timeline here and the
-  // saved plan later can show exactly what that step uses.
+  // Builds one shared timeline in two groups:
+  //  - "Main" recipes (not marked as appetizers) are aligned so all of
+  //    THEIR last steps finish at the same moment — find the longest
+  //    total duration among just the mains, then give every shorter main
+  //    a start delay equal to the difference, so it still finishes when
+  //    the longest one does.
+  //  - Appetizer-marked recipes skip that alignment entirely and always
+  //    start at time zero, so they finish as soon as possible rather than
+  //    being held back to line up with the mains.
+  // Within a recipe, a step's "offset" is its recipe's start delay plus
+  // the total time of every step before it in that same recipe. Steps
+  // from every selected recipe are then merged and sorted by that
+  // offset. Each step also carries its own resolved ingredient list
+  // (name/amount/unit, looked up from the recipe's ingredientIds) and
+  // whether it belongs to an appetizer, so both the timeline here and the
+  // saved plan later can show exactly what that step uses and its group.
   const timeline = useMemo(() => {
-    const recipeTotals = selectedRecipes.map((r) =>
+    const isAppetizer = (recipeId: number) =>
+      appetizerRecipeIds.includes(recipeId);
+
+    const recipeTotal = (r: any) =>
       r.steps.reduce(
         (sum: number, s: any) =>
           sum + (s.timeValue || 0) * unitToSeconds(s.timeUnit),
         0,
-      ),
-    );
-    const maxTotal = recipeTotals.length > 0 ? Math.max(...recipeTotals) : 0;
+      );
+
+    const mainRecipes = selectedRecipes.filter((r) => !isAppetizer(r.id));
+    const mainTotals = mainRecipes.map(recipeTotal);
+    const mainMaxTotal = mainTotals.length > 0 ? Math.max(...mainTotals) : 0;
 
     const items: TimelineItem[] = [];
 
-    selectedRecipes.forEach((r, recipeIndex) => {
-      const startDelay = maxTotal - recipeTotals[recipeIndex];
+    selectedRecipes.forEach((r) => {
+      const appetizer = isAppetizer(r.id);
+      const startDelay = appetizer ? 0 : mainMaxTotal - recipeTotal(r);
       let cumulative = startDelay;
+
       r.steps.forEach((s: any) => {
         const durationSeconds = (s.timeValue || 0) * unitToSeconds(s.timeUnit);
         const stepIngredients: PlanStepIngredient[] = (s.ingredientIds || [])
@@ -168,13 +194,73 @@ export default function CompiledScreen() {
           offsetSeconds: cumulative,
           durationSeconds,
           ingredients: stepIngredients,
+          isAppetizer: appetizer,
         });
         cumulative += durationSeconds;
       });
     });
 
     return items.sort((a, b) => a.offsetSeconds - b.offsetSeconds);
-  }, [selectedRecipes]);
+  }, [selectedRecipes, appetizerRecipeIds]);
+
+  // The whole plan's total length: the latest point any step finishes at.
+  const totalPlanSeconds = useMemo(() => {
+    if (timeline.length === 0) return 0;
+    return Math.max(
+      ...timeline.map((t) => t.offsetSeconds + t.durationSeconds),
+    );
+  }, [timeline]);
+
+  // The display starts as "00:00"; each typed digit fills the next
+  // position left to right (hour tens, hour ones, minute tens, minute
+  // ones), with not-yet-typed positions showing as "0" until filled.
+  const paddedDigits = endTimeDigits.padEnd(4, "0");
+  const endTimeDisplay = `${paddedDigits.slice(0, 2)}:${paddedDigits.slice(2, 4)}`;
+
+  const addEndTimeDigit = (d: string) => {
+    setEndTimeDigits((prev) => (prev.length < 4 ? prev + d : prev));
+  };
+  const backspaceEndTimeDigit = () => {
+    setEndTimeDigits((prev) => prev.slice(0, -1));
+  };
+  const clearEndTime = () => setEndTimeDigits("");
+
+  // Only treat the end time as set once all 4 digits are entered; a
+  // partially-filled or empty box behaves the same as "no end time" —
+  // start immediately. Once complete, hour must be 1-12 and minute 0-59.
+  const endTimeInvalid = useMemo(() => {
+    if (endTimeDigits.length < 4) return false;
+    const hour12 = Number(paddedDigits.slice(0, 2));
+    const minute = Number(paddedDigits.slice(2, 4));
+    return !(hour12 >= 1 && hour12 <= 12 && minute >= 0 && minute <= 59);
+  }, [endTimeDigits, paddedDigits]);
+
+  const parsedEndTime = useMemo(() => {
+    if (endTimeDigits.length < 4 || endTimeInvalid) return null;
+    const hour12 = Number(paddedDigits.slice(0, 2));
+    const minute = Number(paddedDigits.slice(2, 4));
+    let hour24 = hour12 % 12;
+    if (endTimeMeridiem === "PM") hour24 += 12;
+    const result = new Date();
+    result.setHours(hour24, minute, 0, 0);
+    if (result.getTime() <= Date.now()) {
+      result.setDate(result.getDate() + 1);
+    }
+    return result;
+  }, [endTimeDigits, endTimeInvalid, paddedDigits, endTimeMeridiem]);
+
+  // If a valid end time was entered, work backward from it so the whole
+  // plan finishes exactly then. Otherwise, start right away (from the
+  // moment this screen loaded).
+  const planStartTime = useMemo(() => {
+    if (parsedEndTime) {
+      return new Date(parsedEndTime.getTime() - totalPlanSeconds * 1000);
+    }
+    return generatedAt;
+  }, [parsedEndTime, totalPlanSeconds, generatedAt]);
+
+  const scheduledTimeFor = (offsetSeconds: number): Date =>
+    new Date(planStartTime.getTime() + offsetSeconds * 1000);
 
   const handleSavePlan = async () => {
     if (selectedRecipes.length === 0) return;
@@ -189,6 +275,7 @@ export default function CompiledScreen() {
         offsetSeconds: t.offsetSeconds,
         durationSeconds: t.durationSeconds,
         ingredients: t.ingredients,
+        isAppetizer: t.isAppetizer,
       }));
 
       const plan: Plan = {
@@ -201,6 +288,7 @@ export default function CompiledScreen() {
         })),
         steps: planSteps,
         activeSteps: [],
+        scheduledStartAt: planStartTime.getTime(),
       };
 
       await addPlan(plan);
@@ -234,6 +322,92 @@ export default function CompiledScreen() {
           onChangeText={setPlanName}
         />
 
+        <Text style={styles.label}>End Time</Text>
+        <View style={styles.endTimeDisplayRow}>
+          <Text
+            style={[
+              styles.endTimeDisplay,
+              endTimeInvalid && styles.endTimeDisplayInvalid,
+            ]}
+          >
+            {endTimeDisplay} {endTimeMeridiem}
+          </Text>
+          {endTimeDigits.length > 0 && (
+            <TouchableOpacity onPress={clearEndTime}>
+              <Text style={styles.clearText}>Clear</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+        {endTimeInvalid ? (
+          <Text style={styles.errorHint}>
+            Hour must be 1-12 and minute 00-59.
+          </Text>
+        ) : (
+          <Text style={styles.timelineHint}>
+            Leave at 00:00 (or clear it) to start immediately instead.
+          </Text>
+        )}
+
+        <View style={styles.meridiemRow}>
+          <TouchableOpacity
+            style={[
+              styles.meridiemButton,
+              endTimeMeridiem === "AM" && styles.meridiemButtonActive,
+            ]}
+            onPress={() => setEndTimeMeridiem("AM")}
+          >
+            <Text
+              style={[
+                styles.meridiemButtonText,
+                endTimeMeridiem === "AM" && styles.meridiemButtonTextActive,
+              ]}
+            >
+              AM
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.meridiemButton,
+              endTimeMeridiem === "PM" && styles.meridiemButtonActive,
+            ]}
+            onPress={() => setEndTimeMeridiem("PM")}
+          >
+            <Text
+              style={[
+                styles.meridiemButtonText,
+                endTimeMeridiem === "PM" && styles.meridiemButtonTextActive,
+              ]}
+            >
+              PM
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.keypad}>
+          {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((d) => (
+            <TouchableOpacity
+              key={d}
+              style={styles.keypadButton}
+              onPress={() => addEndTimeDigit(d)}
+            >
+              <Text style={styles.keypadButtonText}>{d}</Text>
+            </TouchableOpacity>
+          ))}
+          <View style={styles.keypadButton} />
+          <TouchableOpacity
+            style={styles.keypadButton}
+            onPress={() => addEndTimeDigit("0")}
+          >
+            <Text style={styles.keypadButtonText}>0</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.keypadButton}
+            onPress={backspaceEndTimeDigit}
+          >
+            <Text style={styles.keypadButtonText}>⌫</Text>
+          </TouchableOpacity>
+        </View>
+
         <Text style={styles.sectionTitle}>Combined Ingredients</Text>
         {combinedIngredients.length === 0 ? (
           <Text style={styles.emptyText}>No ingredients found.</Text>
@@ -247,7 +421,9 @@ export default function CompiledScreen() {
 
         <Text style={styles.sectionTitle}>Timeline</Text>
         <Text style={styles.timelineHint}>
-          Timed so every recipe's last step finishes at the same time.
+          {parsedEndTime
+            ? `Scheduled backward so everything's ready by ${formatClockTime(parsedEndTime)}.`
+            : "Starting immediately — mains finish together, appetizers finish ASAP."}
         </Text>
         {timeline.length === 0 ? (
           <Text style={styles.emptyText}>No steps found.</Text>
@@ -261,13 +437,18 @@ export default function CompiledScreen() {
               >
                 <View style={styles.timelineOffsetBadge}>
                   <Text style={styles.timelineOffsetText}>
-                    {formatSeconds(step.offsetSeconds)}
+                    {formatClockTime(scheduledTimeFor(step.offsetSeconds))}
                   </Text>
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={[styles.timelineRecipeTag, { color }]}>
-                    {step.recipeName}
-                  </Text>
+                  <View style={styles.timelineTagRow}>
+                    <Text style={[styles.timelineRecipeTag, { color }]}>
+                      {step.recipeName}
+                    </Text>
+                    {step.isAppetizer && (
+                      <Text style={styles.appetizerBadge}>APPETIZER</Text>
+                    )}
+                  </View>
                   <Text style={styles.timelineText}>{step.text}</Text>
                   {step.description ? (
                     <Text style={styles.timelineDescription}>
@@ -288,7 +469,7 @@ export default function CompiledScreen() {
         <TouchableOpacity
           style={[styles.saveButton, saving && styles.saveButtonDisabled]}
           onPress={handleSavePlan}
-          disabled={saving || selectedRecipes.length === 0}
+          disabled={saving || selectedRecipes.length === 0 || endTimeInvalid}
         >
           <Text style={styles.saveButtonText}>
             {saving ? "Saving..." : "Save Plan"}
@@ -324,6 +505,81 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: "#2B2118",
     marginBottom: 8,
+  },
+  errorHint: {
+    fontSize: 12,
+    color: "#B04A3B",
+    marginBottom: 8,
+    marginTop: -4,
+  },
+  endTimeDisplayRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E0D5C7",
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginBottom: 4,
+  },
+  endTimeDisplay: {
+    fontSize: 26,
+    fontWeight: "700",
+    color: "#2B2118",
+    letterSpacing: 1,
+  },
+  endTimeDisplayInvalid: {
+    color: "#B04A3B",
+  },
+  clearText: {
+    fontSize: 13,
+    color: "#B04A3B",
+    fontWeight: "600",
+  },
+  meridiemRow: {
+    flexDirection: "row",
+    marginTop: 10,
+    marginBottom: 14,
+  },
+  meridiemButton: {
+    flex: 1,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: "#E0D5C7",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+  },
+  meridiemButtonActive: {
+    backgroundColor: "#D97B4F",
+    borderColor: "#D97B4F",
+  },
+  meridiemButtonText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#8A7A68",
+  },
+  meridiemButtonTextActive: {
+    color: "#fff",
+  },
+  keypad: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginBottom: 20,
+  },
+  keypadButton: {
+    width: "33.33%",
+    paddingVertical: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 0.5,
+    borderColor: "#E0D5C7",
+  },
+  keypadButtonText: {
+    fontSize: 20,
+    fontWeight: "600",
+    color: "#2B2118",
   },
   sectionTitle: {
     fontSize: 13,
@@ -361,7 +617,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     marginRight: 12,
-    minWidth: 48,
+    minWidth: 88,
     alignItems: "center",
   },
   timelineOffsetText: {
@@ -369,12 +625,27 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
   },
+  timelineTagRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 2,
+  },
   timelineRecipeTag: {
     fontSize: 11,
     color: "#8A5A2E",
     fontWeight: "700",
     textTransform: "uppercase",
-    marginBottom: 2,
+  },
+  appetizerBadge: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#fff",
+    backgroundColor: "#5B8C5A",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    marginLeft: 8,
+    overflow: "hidden",
   },
   timelineText: {
     fontSize: 15,

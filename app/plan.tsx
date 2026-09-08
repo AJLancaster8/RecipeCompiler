@@ -1,42 +1,43 @@
 import { useLocalSearchParams, useNavigation } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import {
-    Alert,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Alert,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
-    cancelStepNotification,
-    ensureNotificationPermissions,
-    notificationsSupported,
-    scheduleStepNotification,
+  cancelStepNotification,
+  ensureNotificationPermissions,
+  notificationsSupported,
+  scheduleStepNotification,
 } from "./notifications";
 import { ActiveStep, PlanStep, usePlans } from "./plan-store";
 import { getRecipeColor } from "./recipe-colors";
 
-// Formats a countdown as m:ss (or h:mm:ss once past an hour)
+// Formats a countdown (or any duration) as zero-padded hh:mm:ss
 function formatCountdown(totalSeconds: number): string {
   const clamped = Math.max(0, Math.round(totalSeconds));
   const h = Math.floor(clamped / 3600);
   const m = Math.floor((clamped % 3600) / 60);
   const s = clamped % 60;
   const pad = (n: number) => String(n).padStart(2, "0");
-  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+  return `${pad(h)}:${pad(m)}:${pad(s)}`;
 }
 
-// Same short-label formatting used on the compiled screen, for offsets
-function formatOffset(totalSeconds: number): string {
-  if (totalSeconds < 60) return `${Math.round(totalSeconds)}s`;
-  if (totalSeconds < 3600) {
-    const m = totalSeconds / 60;
-    return `${Number.isInteger(m) ? m : m.toFixed(1)}m`;
-  }
-  const h = totalSeconds / 3600;
-  return `${Number.isInteger(h) ? h : h.toFixed(1)}h`;
+// Formats a Date's time-of-day as zero-padded hh:mm:ss (24-hour) — used
+// to show each step's actual scheduled clock time, computed from the
+// plan's scheduledStartAt plus that step's offset.
+function formatClockTime(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  let hours = date.getHours();
+  const meridiem = hours >= 12 ? "PM" : "AM";
+  hours = hours % 12;
+  if (hours === 0) hours = 12;
+  return `${hours}:${pad(date.getMinutes())}:${pad(date.getSeconds())} ${meridiem}`;
 }
 
 // Joins an ingredient's amounts naturally: "1 whole", "1 whole and 3 cup",
@@ -59,8 +60,12 @@ export default function PlanScreen() {
   const plan = useMemo(() => {
     const found = plans.find((p) => p.id === Number(id));
     if (!found) return found;
-    // Guard against older saved plans from before activeSteps existed
-    return { ...found, activeSteps: found.activeSteps || [] };
+    // Guard against older saved plans from before activeSteps/scheduledStartAt existed
+    return {
+      ...found,
+      activeSteps: found.activeSteps || [],
+      scheduledStartAt: found.scheduledStartAt || Date.now(),
+    };
   }, [plans, id]);
 
   // Ask for notification permission once, up front, so the first "Mark In
@@ -235,13 +240,22 @@ export default function PlanScreen() {
               <View style={styles.stepTopRow}>
                 <View style={styles.offsetBadge}>
                   <Text style={styles.offsetBadgeText}>
-                    {formatOffset(step.offsetSeconds)}
+                    {formatClockTime(
+                      new Date(
+                        plan.scheduledStartAt + step.offsetSeconds * 1000,
+                      ),
+                    )}
                   </Text>
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={[styles.recipeTag, { color }]}>
-                    {step.recipeName}
-                  </Text>
+                  <View style={styles.tagRow}>
+                    <Text style={[styles.recipeTag, { color }]}>
+                      {step.recipeName}
+                    </Text>
+                    {step.isAppetizer && (
+                      <Text style={styles.appetizerBadge}>APPETIZER</Text>
+                    )}
+                  </View>
                   <Text style={styles.stepText}>{step.text}</Text>
                   {step.description ? (
                     <Text style={styles.stepDescription}>
@@ -389,7 +403,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     marginRight: 12,
-    minWidth: 48,
+    minWidth: 88,
     alignItems: "center",
   },
   offsetBadgeText: {
@@ -397,12 +411,27 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
   },
+  tagRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 2,
+  },
   recipeTag: {
     fontSize: 11,
     color: "#8A5A2E",
     fontWeight: "700",
     textTransform: "uppercase",
-    marginBottom: 2,
+  },
+  appetizerBadge: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#fff",
+    backgroundColor: "#5B8C5A",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    marginLeft: 8,
+    overflow: "hidden",
   },
   stepText: {
     fontSize: 15,

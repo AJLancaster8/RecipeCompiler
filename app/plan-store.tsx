@@ -1,10 +1,10 @@
 import * as FileSystem from "expo-file-system/legacy";
 import {
-    createContext,
-    ReactNode,
-    useContext,
-    useEffect,
-    useState,
+  createContext,
+  ReactNode,
+  useContext,
+  useEffect,
+  useState,
 } from "react";
 import { advanceIdCounter } from "./recipe-store";
 
@@ -34,6 +34,7 @@ export type PlanStep = {
   offsetSeconds: number;
   durationSeconds: number;
   ingredients: PlanStepIngredient[]; // the specific ingredients this step uses
+  isAppetizer: boolean; // marked to finish ASAP rather than aligned with the mains
 };
 
 export type ActiveStep = {
@@ -52,6 +53,10 @@ export type Plan = {
   // Steps currently marked "in progress" — at most one per recipeId,
   // but different recipes can each have their own active step at once.
   activeSteps: ActiveStep[];
+  // Epoch ms that a step's offsetSeconds counts from — either the target
+  // end time worked backward from, or the moment the plan was compiled
+  // if no end time was given. Used to show each step's real clock time.
+  scheduledStartAt: number;
 };
 
 const PLANS_FILE = FileSystem.documentDirectory + "plans.json";
@@ -93,6 +98,10 @@ async function readPlansFromDisk(): Promise<Plan[]> {
       return parsed.map((p: any) => ({
         ...p,
         activeSteps: Array.isArray(p.activeSteps) ? p.activeSteps : [],
+        scheduledStartAt:
+          typeof p.scheduledStartAt === "number"
+            ? p.scheduledStartAt
+            : Date.now(),
         // Migrate older saved plans: earlier versions stored one entry
         // per name+unit combo (e.g. two separate rows for "Onion, 1
         // whole" and "Onion, 3 cup"). Group those by name into the new
@@ -138,6 +147,8 @@ async function readPlansFromDisk(): Promise<Plan[]> {
         steps: (p.steps || []).map((s: any) => ({
           ...s,
           ingredients: Array.isArray(s.ingredients) ? s.ingredients : [],
+          isAppetizer:
+            typeof s.isAppetizer === "boolean" ? s.isAppetizer : false,
         })),
       }));
     }
