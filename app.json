@@ -9,14 +9,17 @@
     "splash": {
       "backgroundColor": "#FAF7F2"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true
     },
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#FAF7F2"
-      }
+      },
+      "package": "com.ajlancaster8.recipeapp"
     },
     "web": {
       "output": "single",
@@ -29,6 +32,12 @@
       "expo-splash-screen",
       "expo-status-bar",
       "expo-web-browser"
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "9ceb797e-4311-4192-86c0-d087a943afd3"
+      }
+    }
   }
 }
