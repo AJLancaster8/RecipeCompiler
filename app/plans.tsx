@@ -1,19 +1,23 @@
 import { useRouter } from "expo-router";
 import {
-    ActivityIndicator,
-    Alert,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
+import { Alert } from "../lib/alert";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { usePlans } from "./plan-store";
+import { useRecipes } from "./recipe-store";
 
 export default function PlansScreen() {
   const router = useRouter();
   const { plans, deletePlan, loading } = usePlans();
+  // A plan can use your own recipes and the ones you've saved.
+  const { planRecipes } = useRecipes();
+  const canCreate = planRecipes.length >= 2;
 
   const confirmDelete = (id: number, name: string) => {
     Alert.alert(
@@ -26,15 +30,34 @@ export default function PlansScreen() {
     );
   };
 
+  const newPlan = () => {
+    if (!canCreate) {
+      Alert.alert(
+        "Not enough recipes",
+        "A plan combines two or more recipes. Create some, or save some from Discover, first.",
+      );
+      return;
+    }
+    router.push("/compile");
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
+        <TouchableOpacity
+          style={[styles.newPlanButton, !canCreate && { opacity: 0.6 }]}
+          onPress={newPlan}
+          accessibilityRole="button"
+        >
+          <Text style={styles.newPlanButtonText}>+ New Plan</Text>
+        </TouchableOpacity>
+
         {loading ? (
           <ActivityIndicator style={{ marginTop: 40 }} color="#D97B4F" />
         ) : plans.length === 0 ? (
           <Text style={styles.emptyText}>
-            No saved plans yet. Compile some recipes and save the result to see
-            it here.
+            No saved plans yet. Tap “+ New Plan” to combine your recipes (or
+            ones you&apos;ve saved) into a cooking plan.
           </Text>
         ) : (
           <ScrollView
@@ -84,11 +107,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingTop: 20,
   },
+  newPlanButton: {
+    backgroundColor: "#D97B4F",
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+    width: "100%",
+    marginBottom: 16,
+  },
+  newPlanButtonText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "700",
+  },
   emptyText: {
     fontSize: 15,
     color: "#8A7A68",
     textAlign: "center",
-    marginTop: 40,
+    marginTop: 24,
   },
   planCard: {
     backgroundColor: "#FFFFFF",

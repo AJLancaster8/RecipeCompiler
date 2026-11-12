@@ -1,0 +1,13 @@
+{
+  "name": "recipecompiler-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Stores RecipeCompiler recipes as JSON files and enforces per-device ownership",
+  "main": "index.js",
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning index.js"
+  },
+  "engines": {
+    "node": ">=22.5"
+  }
+}

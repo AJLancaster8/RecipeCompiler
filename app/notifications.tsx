@@ -1,5 +1,6 @@
-import Constants from "expo-constants";
-import { Platform } from "react-native";
+import { isRunningInExpoGo } from 'expo';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
+import { Platform } from 'react-native';
 
 // As of Expo SDK 53, expo-notifications was removed from Expo Go on
 // Android entirely — even just importing it throws there. iOS Expo Go
@@ -8,24 +9,41 @@ import { Platform } from "react-native";
 // So: only attempt to load the native module when we're NOT on
 // Android-inside-Expo-Go. Everywhere else, these functions become
 // harmless no-ops instead of crashing the app.
-const isExpoGo = Constants.appOwnership === "expo";
-const notificationsBlocked = Platform.OS === "android" && isExpoGo;
+// isRunningInExpoGo() checks for Expo Go's native module directly, which is
+// the most reliable signal; the Constants check is a backup.
+const isExpoGo =
+  isRunningInExpoGo() || Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
+const notificationsBlocked = Platform.OS === 'android' && isExpoGo;
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-let NotificationsModule: typeof import("expo-notifications") | null = null;
+let NotificationsModule: typeof import('expo-notifications') | null = null;
 
 if (!notificationsBlocked) {
   try {
-    NotificationsModule = require("expo-notifications");
+    NotificationsModule = require('expo-notifications');
     NotificationsModule?.setNotificationHandler({
       handleNotification: async () => ({
-        shouldShowAlert: true,
+        shouldShowBanner: true,
+        shouldShowList: true,
         shouldPlaySound: true,
         shouldSetBadge: false,
       }),
     });
+
+    // Android requires every notification to belong to a "channel" (since
+    // Android 8) or it can be silently dropped even when scheduling
+    // succeeds without error. iOS has no concept of channels, so this is
+    // a no-op there.
+    if (Platform.OS === 'android' && NotificationsModule) {
+      NotificationsModule.setNotificationChannelAsync('default', {
+        name: 'Step timers',
+        importance: NotificationsModule.AndroidImportance.HIGH,
+        // No `sound` key: on Android it names a custom sound file, and
+        // leaving it out uses the system default notification sound.
+        vibrationPattern: [0, 250, 250, 250],
+      }).catch((err) => console.warn('Failed to set up notification channel:', err));
+    }
   } catch (err) {
-    console.warn("expo-notifications unavailable in this environment:", err);
+    console.warn('expo-notifications unavailable in this environment:', err);
     NotificationsModule = null;
   }
 }
@@ -41,7 +59,7 @@ export async function ensureNotificationPermissions(): Promise<boolean> {
     const request = await NotificationsModule.requestPermissionsAsync();
     return request.granted;
   } catch (err) {
-    console.warn("Failed to get notification permissions:", err);
+    console.warn('Failed to get notification permissions:', err);
     return false;
   }
 }
@@ -53,7 +71,7 @@ export async function ensureNotificationPermissions(): Promise<boolean> {
 export async function scheduleStepNotification(
   recipeName: string,
   stepText: string,
-  durationSeconds: number,
+  durationSeconds: number
 ): Promise<string | null> {
   if (!NotificationsModule) return null;
   try {
@@ -68,22 +86,21 @@ export async function scheduleStepNotification(
       },
       trigger: {
         seconds: Math.max(1, Math.round(durationSeconds)),
+        channelId: Platform.OS === 'android' ? 'default' : undefined,
       } as any,
     });
     return id;
   } catch (err) {
-    console.warn("Failed to schedule step notification:", err);
+    console.warn('Failed to schedule step notification:', err);
     return null;
   }
 }
 
-export async function cancelStepNotification(
-  notificationId: string | null,
-): Promise<void> {
+export async function cancelStepNotification(notificationId: string | null): Promise<void> {
   if (!NotificationsModule || !notificationId) return;
   try {
     await NotificationsModule.cancelScheduledNotificationAsync(notificationId);
-  } catch (err) {
+  } catch {
     // Already fired or already cancelled — safe to ignore
   }
 }

@@ -1,20 +1,34 @@
-import { useRouter } from "expo-router";
-import { useState } from "react";
+import { useFocusEffect, useRouter } from "expo-router";
+import { Fragment, useCallback, useState } from "react";
 import {
-  Alert,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
+import { Alert } from "../lib/alert";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRecipes } from "./recipe-store";
+import { Recipe, useRecipes } from "./recipe-store";
 
 export default function CompileScreen() {
   const router = useRouter();
-  const { recipes } = useRecipes();
+  const { recipes: myRecipes, savedRecipes, refreshSaved } = useRecipes();
+  // Saved recipes that aren't your own (your own appear under My Recipes).
+  const myIds = new Set(myRecipes.map((r) => r.id));
+  const otherSaved = savedRecipes.filter((r) => !myIds.has(r.id));
+  const sections = [
+    { title: "My Recipes", recipes: myRecipes },
+    { title: "Saved Recipes", recipes: otherSaved },
+  ].filter((s) => s.recipes.length > 0);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
+
+  // Pick up anything saved from Discover since the app loaded.
+  useFocusEffect(
+    useCallback(() => {
+      refreshSaved();
+    }, [refreshSaved]),
+  );
   const [appetizerIds, setAppetizerIds] = useState<number[]>([]);
 
   const toggle = (id: number) => {
@@ -47,6 +61,61 @@ export default function CompileScreen() {
     router.push(`/compiled?ids=${selectedIds.join(",")}${appetizersParam}`);
   };
 
+  const renderOption = (r: Recipe) => {
+    const selected = selectedIds.includes(r.id);
+    const isAppetizer = appetizerIds.includes(r.id);
+    return (
+      <View
+        key={r.id}
+        style={[
+          styles.recipeOption,
+          selected && styles.recipeOptionSelected,
+        ]}
+      >
+        <TouchableOpacity
+          style={styles.recipeMainRow}
+          onPress={() => toggle(r.id)}
+        >
+          <View
+            style={[
+              styles.checkbox,
+              selected && styles.checkboxChecked,
+            ]}
+          >
+            {selected && <Text style={styles.checkmark}>✓</Text>}
+          </View>
+          <View style={{ flexShrink: 1 }}>
+            <Text style={styles.recipeOptionText}>{r.name}</Text>
+            {!r.isMine && r.authorName && (
+              <Text style={styles.recipeAuthor}>by {r.authorName}</Text>
+            )}
+          </View>
+        </TouchableOpacity>
+
+        {selected && (
+          <TouchableOpacity
+            style={styles.appetizerRow}
+            onPress={() => toggleAppetizer(r.id)}
+          >
+            <View
+              style={[
+                styles.checkboxSmall,
+                isAppetizer && styles.checkboxChecked,
+              ]}
+            >
+              {isAppetizer && (
+                <Text style={styles.checkmarkSmall}>✓</Text>
+              )}
+            </View>
+            <Text style={styles.appetizerText}>
+              Appetizer (finish ASAP)
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
@@ -60,60 +129,18 @@ export default function CompileScreen() {
           style={{ width: "100%" }}
           contentContainerStyle={{ paddingBottom: 20 }}
         >
-          {recipes.length === 0 ? (
+          {sections.length === 0 ? (
             <Text style={styles.emptyText}>
-              You don't have any saved recipes yet.
+              You don&apos;t have any recipes yet. Create one, or save some from
+              Discover, to build a plan.
             </Text>
           ) : (
-            recipes.map((r) => {
-              const selected = selectedIds.includes(r.id);
-              const isAppetizer = appetizerIds.includes(r.id);
-              return (
-                <View
-                  key={r.id}
-                  style={[
-                    styles.recipeOption,
-                    selected && styles.recipeOptionSelected,
-                  ]}
-                >
-                  <TouchableOpacity
-                    style={styles.recipeMainRow}
-                    onPress={() => toggle(r.id)}
-                  >
-                    <View
-                      style={[
-                        styles.checkbox,
-                        selected && styles.checkboxChecked,
-                      ]}
-                    >
-                      {selected && <Text style={styles.checkmark}>✓</Text>}
-                    </View>
-                    <Text style={styles.recipeOptionText}>{r.name}</Text>
-                  </TouchableOpacity>
-
-                  {selected && (
-                    <TouchableOpacity
-                      style={styles.appetizerRow}
-                      onPress={() => toggleAppetizer(r.id)}
-                    >
-                      <View
-                        style={[
-                          styles.checkboxSmall,
-                          isAppetizer && styles.checkboxChecked,
-                        ]}
-                      >
-                        {isAppetizer && (
-                          <Text style={styles.checkmarkSmall}>✓</Text>
-                        )}
-                      </View>
-                      <Text style={styles.appetizerText}>
-                        Appetizer (finish ASAP)
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              );
-            })
+            sections.map((section) => (
+              <Fragment key={section.title}>
+                <Text style={styles.sectionHeading}>{section.title}</Text>
+                {section.recipes.map(renderOption)}
+              </Fragment>
+            ))
           )}
         </ScrollView>
 
@@ -219,6 +246,19 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#2B2118",
     fontWeight: "600",
+  },
+  recipeAuthor: {
+    fontSize: 12,
+    color: "#8A7A68",
+    marginTop: 2,
+  },
+  sectionHeading: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#8A7A68",
+    textTransform: "uppercase",
+    marginTop: 8,
+    marginBottom: 8,
   },
   appetizerText: {
     fontSize: 13,

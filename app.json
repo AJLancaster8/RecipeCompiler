@@ -6,9 +6,6 @@
     "scheme": "recipeapp",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
-    "splash": {
-      "backgroundColor": "#FAF7F2"
-    },
     "assetBundlePatterns": [
       "**/*"
     ],
@@ -27,11 +24,20 @@
     },
     "plugins": [
       "expo-router",
-      "expo-font",
-      "expo-image",
-      "expo-splash-screen",
-      "expo-status-bar",
-      "expo-web-browser"
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#FAF7F2"
+        }
+      ],
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Recipe App uses your photos to set your profile picture.",
+          "cameraPermission": "Recipe App uses the camera to take your profile picture."
+        }
+      ]
     ],
     "extra": {
       "router": {},
