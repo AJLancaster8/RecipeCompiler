@@ -1,14 +1,13 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useMemo, useState } from "react";
-import {
-  Alert,
-  ScrollView,
+import {  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
+import { Alert } from "../lib/alert";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Plan, PlanStep, PlanStepIngredient, usePlans } from "./plan-store";
 import { getRecipeColor } from "./recipe-colors";
@@ -43,18 +42,14 @@ type TimelineItem = {
   isAppetizer: boolean;
 };
 
-type CombinedIngredient = {
-  name: string;
-  amounts: { amount: number; unit: string }[];
-};
-
 export default function CompiledScreen() {
   const { ids, appetizers } = useLocalSearchParams<{
     ids?: string;
     appetizers?: string;
   }>();
   const router = useRouter();
-  const { recipes } = useRecipes();
+  // Own recipes and saved ones can both go into a plan.
+  const { planRecipes: recipes } = useRecipes();
   const { addPlan } = usePlans();
   const [saving, setSaving] = useState(false);
 
@@ -298,7 +293,7 @@ export default function CompiledScreen() {
           onPress: () => router.replace(`/plan?id=${plan.id}`),
         },
       ]);
-    } catch (err) {
+    } catch {
       Alert.alert(
         "Save failed",
         "There was a problem saving this plan to your device.",

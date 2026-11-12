@@ -1,110 +1,126 @@
 import { useRouter } from "expo-router";
 import {
-  ActivityIndicator,
-  Alert,
+  ActivityIndicator,  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
+import { Alert } from "../lib/alert";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { RecipeDetails } from "../components/recipe-details";
+import { SaveButton } from "../components/save-button";
 import { usePlans } from "./plan-store";
-import { useRecipes } from "./recipe-store";
+import { describeRecipeError, Recipe, useRecipes } from "./recipe-store";
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { recipes, deleteRecipe, loading } = useRecipes();
+  const {
+    recipes,
+    planRecipes,
+    deleteRecipe,
+    markSaved,
+    loading,
+    refresh,
+    refreshing,
+    error,
+  } = useRecipes();
   const { plans } = usePlans();
 
   const confirmDelete = (id: number, name: string) => {
     Alert.alert(
       "Delete recipe?",
-      `This will remove "${name}" from your device.`,
+      `This will permanently delete "${name}" (and remove it from Discover if it's published).`,
       [
         { text: "Cancel", style: "cancel" },
         {
           text: "Delete",
           style: "destructive",
-          onPress: () => deleteRecipe(id),
+          onPress: () =>
+            deleteRecipe(id).catch((err) =>
+              Alert.alert("Delete failed", describeRecipeError(err)),
+            ),
         },
       ],
     );
   };
 
+  const renderCard = (r: Recipe) => (
+    <View key={r.id} style={styles.recipeCard}>
+      <View style={styles.recipeCardHeader}>
+        <Text style={styles.recipeCardTitle}>{r.name}</Text>
+        <View style={styles.cardActions}>
+          <SaveButton
+            recipeId={r.id}
+            saved={r.isSaved}
+            onChange={(saved) => markSaved(r.id, saved)}
+          />
+          {r.canEdit && (
+            <>
+              <TouchableOpacity
+                onPress={() => router.push(`/new-recipe?id=${r.id}`)}
+              >
+                <Text style={styles.editText}>Edit</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => confirmDelete(r.id, r.name)}>
+                <Text style={styles.deleteText}>Delete</Text>
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
+      </View>
+      <Text style={r.isPublic ? styles.publishedBadge : styles.privateBadge}>
+        {r.isPublic ? "Published to Discover" : "Private"}
+      </Text>
+
+      <RecipeDetails recipe={r} />
+    </View>
+  );
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.homeContainer}>
-        <Text style={styles.homeHeader}>My Recipes</Text>
+        <Text style={styles.homeHeader}>Recipes</Text>
+
+        {error && (
+          <View style={styles.errorBanner}>
+            <Text style={styles.errorText}>
+              {error}
+              {recipes.length > 0 ? " Showing your last saved copy." : ""}
+            </Text>
+          </View>
+        )}
 
         {loading ? (
           <ActivityIndicator style={{ marginTop: 40 }} color="#D97B4F" />
         ) : recipes.length === 0 ? (
-          <Text style={styles.emptyText}>
-            No recipes yet. Tap the button below to add your first one.
-          </Text>
+          <View style={styles.emptyWrap}>
+            <Text style={styles.emptyText}>
+              No recipes yet. Tap the button below to add your first one.
+            </Text>
+            {error && (
+              <TouchableOpacity onPress={refresh} disabled={refreshing}>
+                <Text style={styles.retryText}>
+                  {refreshing ? "Retrying..." : "Retry"}
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
         ) : (
           <ScrollView
             style={{ width: "100%" }}
             contentContainerStyle={{ paddingBottom: 20 }}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={refresh}
+                tintColor="#D97B4F"
+              />
+            }
           >
-            {recipes.map((r) => (
-              <View key={r.id} style={styles.recipeCard}>
-                <View style={styles.recipeCardHeader}>
-                  <Text style={styles.recipeCardTitle}>{r.name}</Text>
-                  <View style={styles.cardActions}>
-                    <TouchableOpacity
-                      onPress={() => router.push(`/new-recipe?id=${r.id}`)}
-                    >
-                      <Text style={styles.editText}>Edit</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => confirmDelete(r.id, r.name)}
-                    >
-                      <Text style={styles.deleteText}>Delete</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-
-                <Text style={styles.sectionLabel}>Ingredients</Text>
-                {r.ingredients.map((ing: any) => (
-                  <Text key={ing.id} style={styles.detailLine}>
-                    • {ing.name}
-                    {ing.amount ? `  —  ${ing.amount} ${ing.unit}` : ""}
-                  </Text>
-                ))}
-
-                <Text style={styles.sectionLabel}>Steps</Text>
-                {r.steps.map((s: any, i: number) => {
-                  const usedIngredients = (s.ingredientIds || [])
-                    .map((id: number) =>
-                      r.ingredients.find((ing: any) => ing.id === id),
-                    )
-                    .filter(Boolean);
-                  return (
-                    <View key={s.id} style={styles.stepDetailBlock}>
-                      <Text style={styles.detailLine}>
-                        {i + 1}. {s.text}
-                        {s.timeValue ? `  (${s.timeValue}${s.timeUnit})` : ""}
-                      </Text>
-                      {s.description ? (
-                        <Text style={styles.stepDescription}>
-                          {s.description}
-                        </Text>
-                      ) : null}
-                      {usedIngredients.length > 0 && (
-                        <Text style={styles.stepIngredientsUsed}>
-                          Uses:{" "}
-                          {usedIngredients
-                            .map((ing: any) => ing.name)
-                            .join(", ")}
-                        </Text>
-                      )}
-                    </View>
-                  );
-                })}
-              </View>
-            ))}
+            <Text style={styles.listHeading}>My Recipes</Text>
+            {recipes.map(renderCard)}
           </ScrollView>
         )}
 
@@ -115,7 +131,8 @@ export default function HomeScreen() {
           <Text style={styles.addRecipeButtonText}>+ Add Recipe</Text>
         </TouchableOpacity>
 
-        {recipes.length >= 2 && (
+        {/* Saved recipes count too — a plan can mix them with your own. */}
+        {planRecipes.length >= 2 && (
           <TouchableOpacity
             style={styles.compileButton}
             onPress={() => router.push("/compile")}
@@ -154,8 +171,50 @@ const styles = StyleSheet.create({
     color: "#2B2118",
     marginBottom: 24,
   },
-  emptyText: {
+  emptyWrap: {
     flex: 1,
+    alignItems: "center",
+  },
+  retryText: {
+    fontSize: 15,
+    color: "#D97B4F",
+    fontWeight: "700",
+    marginTop: 16,
+  },
+  errorBanner: {
+    backgroundColor: "#F6E3DE",
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 16,
+    width: "100%",
+  },
+  errorText: {
+    fontSize: 13,
+    color: "#B04A3B",
+  },
+  listHeading: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#8A7A68",
+    textTransform: "uppercase",
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  publishedBadge: {
+    fontSize: 12,
+    color: "#5E8A4F",
+    fontWeight: "600",
+    marginTop: -4,
+    marginBottom: 4,
+  },
+  privateBadge: {
+    fontSize: 12,
+    color: "#8A7A68",
+    fontWeight: "600",
+    marginTop: -4,
+    marginBottom: 4,
+  },
+  emptyText: {
     fontSize: 15,
     color: "#8A7A68",
     textAlign: "center",
@@ -194,35 +253,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: "#B04A3B",
     fontWeight: "600",
-  },
-  sectionLabel: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#8A7A68",
-    textTransform: "uppercase",
-    marginTop: 8,
-    marginBottom: 4,
-  },
-  detailLine: {
-    fontSize: 14,
-    color: "#4A3B2C",
-    marginBottom: 2,
-  },
-  stepDetailBlock: {
-    marginBottom: 8,
-  },
-  stepDescription: {
-    fontSize: 13,
-    color: "#8A7A68",
-    marginLeft: 16,
-    marginTop: 2,
-  },
-  stepIngredientsUsed: {
-    fontSize: 12,
-    color: "#8A5A2E",
-    fontStyle: "italic",
-    marginLeft: 16,
-    marginTop: 2,
   },
   addRecipeButton: {
     backgroundColor: "#D97B4F",

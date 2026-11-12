@@ -1,0 +1,786 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Recipe Server Admin</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #faf7f2;
+    --surface: #ffffff;
+    --surface-2: #f3eee6;
+    --border: #e6ddd1;
+    --text: #2b2118;
+    --text-2: #5e5143;
+    --muted: #8a7a68;
+    --accent: #c9663a;
+    --accent-ink: #ffffff;
+    --grid: #ece5da;
+    --series-1: #2a78d6;
+    --series-2: #eb6834;
+    --good: #1f7a3a;
+    --warn: #a86400;
+    --bad: #b8332c;
+    --bad-bg: #f8e4e1;
+    --warn-bg: #fbeed6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #161412;
+      --surface: #1f1c19;
+      --surface-2: #2a2622;
+      --border: #3a342e;
+      --text: #f0ece6;
+      --text-2: #cdc4b8;
+      --muted: #9d9284;
+      --accent: #e08458;
+      --accent-ink: #1a1412;
+      --grid: #2e2924;
+      --series-1: #3987e5;
+      --series-2: #d95926;
+      --good: #5cc27a;
+      --warn: #e0a640;
+      --bad: #ef7a72;
+      --bad-bg: #3a2220;
+      --warn-bg: #3a2e18;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #161412; --surface: #1f1c19; --surface-2: #2a2622; --border: #3a342e;
+    --text: #f0ece6; --text-2: #cdc4b8; --muted: #9d9284; --accent: #e08458; --accent-ink: #1a1412;
+    --grid: #2e2924; --series-1: #3987e5; --series-2: #d95926; --good: #5cc27a; --warn: #e0a640;
+    --bad: #ef7a72; --bad-bg: #3a2220; --warn-bg: #3a2e18;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  button, input, select { font: inherit; color: inherit; }
+  .hidden { display: none !important; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* sign-in */
+  #login { min-height: 100vh; display: grid; place-items: center; padding: 16px; }
+  .login-card {
+    width: 100%; max-width: 360px; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 14px; padding: 28px;
+  }
+  .login-card h1 { margin: 0 0 4px; font-size: 20px; }
+  .login-card p { margin: 0 0 20px; color: var(--muted); }
+  label { display: block; font-weight: 600; font-size: 13px; color: var(--text-2); margin: 12px 0 4px; }
+  input[type=text], input[type=password], input[type=search], select {
+    width: 100%; padding: 9px 11px; border: 1px solid var(--border); border-radius: 9px;
+    background: var(--surface); outline: none;
+  }
+  input:focus, select:focus { border-color: var(--accent); }
+  .btn {
+    border: 1px solid var(--border); background: var(--surface); border-radius: 9px;
+    padding: 7px 14px; cursor: pointer; font-weight: 600;
+  }
+  .btn:hover { background: var(--surface-2); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .btn.primary:hover { filter: brightness(1.05); }
+  .btn:disabled { opacity: .45; cursor: default; }
+  .login-card .btn { width: 100%; margin-top: 20px; padding: 10px; }
+  .form-error { color: var(--bad); margin-top: 12px; min-height: 1.4em; font-size: 13px; }
+
+  /* shell */
+  header {
+    position: sticky; top: 0; z-index: 5; background: var(--surface); border-bottom: 1px solid var(--border);
+  }
+  .bar { max-width: 1240px; margin: 0 auto; padding: 0 16px; display: flex; align-items: center; gap: 16px; min-height: 56px; flex-wrap: wrap; }
+  .brand { font-weight: 700; font-size: 16px; white-space: nowrap; }
+  nav { display: flex; gap: 2px; flex: 1; overflow-x: auto; }
+  nav button {
+    border: 0; background: none; padding: 16px 12px; cursor: pointer; color: var(--muted); font-weight: 600;
+    border-bottom: 2px solid transparent; white-space: nowrap;
+  }
+  nav button[aria-selected=true] { color: var(--text); border-bottom-color: var(--accent); }
+  .who { color: var(--muted); font-size: 13px; display: flex; gap: 10px; align-items: center; white-space: nowrap; }
+  main { max-width: 1240px; margin: 0 auto; padding: 20px 16px 48px; }
+  .status-line { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
+  .status-line.err { color: var(--bad); }
+
+  /* tiles & cards */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .tile, .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+  .tile { padding: 14px 16px; }
+  .tile .label { color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
+  .tile .value { font-size: 26px; font-weight: 700; margin-top: 2px; }
+  .tile .sub { color: var(--text-2); font-size: 12px; }
+  .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 16px; }
+  @media (max-width: 480px) { .grid-2 { grid-template-columns: 1fr; } }
+  .card { padding: 16px; min-width: 0; }
+  .card h2 { font-size: 15px; margin: 0; }
+  .card .card-sub { color: var(--muted); font-size: 12px; margin: 2px 0 10px; }
+  .legend { display: flex; gap: 14px; font-size: 12px; color: var(--text-2); margin-bottom: 4px; flex-wrap: wrap; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+
+  /* charts */
+  .chart { position: relative; }
+  .chart svg { display: block; width: 100%; height: 200px; overflow: visible; }
+  .chart .axis text { fill: var(--muted); font-size: 11px; }
+  .chart .gridline { stroke: var(--grid); stroke-width: 1; }
+  .chart .line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .chart .area { opacity: .12; }
+  .chart .cross { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; }
+  .chart .dot { stroke: var(--surface); stroke-width: 2; }
+  .chart .end-label { font-size: 11px; font-weight: 600; fill: var(--text-2); }
+  .tooltip {
+    position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 7px 10px; font-size: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.12);
+    white-space: nowrap; z-index: 2;
+  }
+  .tooltip .t { color: var(--muted); margin-bottom: 2px; }
+  .tooltip .row { display: flex; gap: 8px; align-items: center; }
+  .tooltip .row i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+  .tooltip .row b { margin-left: auto; padding-left: 12px; }
+
+  /* storage bars */
+  .hbar-row { display: grid; grid-template-columns: minmax(90px, 160px) 1fr auto; gap: 10px; align-items: center; padding: 5px 0; }
+  .hbar-row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
+  .hbar-track { height: 14px; background: var(--surface-2); border-radius: 4px; overflow: hidden; }
+  .hbar-fill { height: 100%; background: var(--series-1); border-radius: 0 4px 4px 0; min-width: 2px; }
+  .hbar-row .v { font-size: 12px; color: var(--text-2); min-width: 64px; text-align: right; }
+  .meter { height: 10px; background: var(--surface-2); border-radius: 5px; overflow: hidden; margin: 8px 0 4px; }
+  .meter div { height: 100%; background: var(--series-1); }
+
+  /* tables */
+  .table-wrap { overflow: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { padding: 7px 10px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { background: var(--surface-2); font-weight: 600; color: var(--text-2); position: sticky; top: 0; white-space: nowrap; }
+  th.sortable { cursor: pointer; user-select: none; }
+  th.sortable:hover { color: var(--text); }
+  tr:last-child td { border-bottom: 0; }
+  td.n { text-align: right; font-variant-numeric: tabular-nums; }
+  th.n { text-align: right; }
+  td .null { color: var(--muted); font-style: italic; }
+  td .masked { color: var(--muted); }
+  td.cell { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  td.cell:hover { white-space: normal; word-break: break-word; }
+  .pk { color: var(--accent); font-size: 10px; margin-left: 4px; }
+
+  /* databases tab */
+  .db-layout { display: grid; grid-template-columns: 230px 1fr; gap: 16px; align-items: start; }
+  @media (max-width: 760px) { .db-layout { grid-template-columns: 1fr; } }
+  .db-side { padding: 8px; }
+  .db-side h3 { font-size: 12px; text-transform: uppercase; color: var(--muted); margin: 10px 8px 4px; letter-spacing: .03em; }
+  .db-side button {
+    display: flex; width: 100%; border: 0; background: none; text-align: left; padding: 7px 10px;
+    border-radius: 8px; cursor: pointer; gap: 8px;
+  }
+  .db-side button:hover { background: var(--surface-2); }
+  .db-side button[aria-current=true] { background: var(--surface-2); font-weight: 700; }
+  .db-side button .c { margin-left: auto; color: var(--muted); font-size: 12px; }
+  .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+  .toolbar h2 { margin: 0; font-size: 16px; flex: 1; min-width: 150px; }
+  .toolbar input[type=search] { width: 240px; max-width: 100%; }
+  .toolbar select { width: auto; }
+  .pager { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 10px; color: var(--text-2); font-size: 13px; flex-wrap: wrap; }
+
+  /* errors */
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+  .chip { border: 1px solid var(--border); background: var(--surface); border-radius: 999px; padding: 5px 12px; cursor: pointer; font-weight: 600; font-size: 13px; }
+  .chip[aria-pressed=true] { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .spacer { flex: 1; }
+  .err-group { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 10px; }
+  .err-group summary { list-style: none; cursor: pointer; padding: 12px 14px; display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; }
+  .err-group summary::-webkit-details-marker { display: none; }
+  .badge { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 6px; white-space: nowrap; }
+  .badge.s5 { background: var(--bad-bg); color: var(--bad); }
+  .badge.s4 { background: var(--warn-bg); color: var(--warn); }
+  .err-msg { font-weight: 600; overflow-wrap: anywhere; }
+  .err-route { color: var(--muted); font-size: 12px; font-family: ui-monospace, Consolas, monospace; }
+  .err-count { text-align: right; }
+  .err-count b { font-size: 18px; }
+  .err-count div { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .err-body { padding: 0 14px 14px; }
+  pre { background: var(--surface-2); padding: 10px; border-radius: 8px; overflow: auto; font-size: 12px; margin: 8px 0 0; }
+  .empty { color: var(--muted); text-align: center; padding: 40px 16px; background: var(--surface); border: 1px dashed var(--border); border-radius: 12px; }
+</style>
+</head>
+<body>
+
+<section id="login">
+  <form class="login-card" id="login-form">
+    <h1>Recipe Server Admin</h1>
+    <p>Sign in with an admin account.</p>
+    <label for="login-name">Username or email</label>
+    <input id="login-name" type="text" autocomplete="username" required>
+    <label for="login-pass">Password</label>
+    <input id="login-pass" type="password" autocomplete="current-password" required>
+    <button class="btn primary" type="submit" id="login-btn">Sign in</button>
+    <div class="form-error" id="login-error" role="alert"></div>
+  </form>
+</section>
+
+<div id="app" class="hidden">
+  <header>
+    <div class="bar">
+      <div class="brand">Recipe Server</div>
+      <nav role="tablist">
+        <button role="tab" data-tab="overview" aria-selected="true">Overview</button>
+        <button role="tab" data-tab="storage" aria-selected="false">Storage</button>
+        <button role="tab" data-tab="errors" aria-selected="false">Errors <span id="err-badge" class="num"></span></button>
+        <button role="tab" data-tab="databases" aria-selected="false">Databases</button>
+      </nav>
+      <div class="who"><span id="who"></span><button class="btn" id="logout">Sign out</button></div>
+    </div>
+  </header>
+
+  <main>
+    <div class="status-line" id="status">Loading…</div>
+
+    <!-- Overview -->
+    <section data-panel="overview">
+      <div class="tiles" id="tiles"></div>
+      <div class="grid-2">
+        <div class="card">
+          <h2>CPU usage</h2>
+          <div class="card-sub">Recipe server process, % of one core · last 10 min</div>
+          <div class="chart" id="chart-cpu"></div>
+        </div>
+        <div class="card">
+          <h2>Memory usage</h2>
+          <div class="card-sub">Recipe server process · last 10 min</div>
+          <div class="legend"><span><i style="background:var(--series-1)"></i>Resident (RSS)</span><span><i style="background:var(--series-2)"></i>JS heap used</span></div>
+          <div class="chart" id="chart-mem"></div>
+        </div>
+        <div class="card">
+          <h2>Requests</h2>
+          <div class="card-sub">Per sample interval (dashboard polling not counted)</div>
+          <div class="chart" id="chart-req"></div>
+        </div>
+        <div class="card">
+          <h2>Response time</h2>
+          <div class="card-sub">Average ms per request, and event-loop delay</div>
+          <div class="legend"><span><i style="background:var(--series-1)"></i>Avg response</span><span><i style="background:var(--series-2)"></i>Event-loop delay</span></div>
+          <div class="chart" id="chart-lat"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Storage -->
+    <section data-panel="storage" class="hidden">
+      <div class="tiles" id="storage-tiles"></div>
+      <div class="grid-2">
+        <div class="card">
+          <h2>Size by database</h2>
+          <div class="card-sub">Database file + write-ahead log (WAL) + shared memory file</div>
+          <div id="storage-dbs"></div>
+        </div>
+        <div class="card">
+          <h2>Size by table</h2>
+          <div class="card-sub">Pages used on disk, indexes included</div>
+          <div id="storage-tables"></div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:16px">
+        <h2>Files</h2>
+        <div class="card-sub" id="storage-dir"></div>
+        <div class="table-wrap"><table id="storage-files"></table></div>
+      </div>
+    </section>
+
+    <!-- Errors -->
+    <section data-panel="errors" class="hidden">
+      <div class="filters">
+        <button class="chip" data-filter="all" aria-pressed="true">All</button>
+        <button class="chip" data-filter="5" aria-pressed="false">Server errors (5xx)</button>
+        <button class="chip" data-filter="4" aria-pressed="false">Client errors (4xx)</button>
+        <span class="spacer"></span>
+        <button class="btn" id="clear-errors">Clear all</button>
+      </div>
+      <div id="errors"></div>
+    </section>
+
+    <!-- Databases -->
+    <section data-panel="databases" class="hidden">
+      <div class="db-layout">
+        <div class="card db-side" id="db-side"></div>
+        <div>
+          <div class="toolbar">
+            <h2 id="tbl-title">Pick a table</h2>
+            <input type="search" id="tbl-search" placeholder="Search all columns" aria-label="Search rows">
+            <select id="tbl-size" aria-label="Rows per page">
+              <option value="25">25 rows</option>
+              <option value="50" selected>50 rows</option>
+              <option value="100">100 rows</option>
+              <option value="200">200 rows</option>
+            </select>
+            <button class="btn" id="tbl-refresh">Refresh</button>
+          </div>
+          <div class="table-wrap"><table id="tbl"></table></div>
+          <div class="pager">
+            <span id="tbl-info" class="num"></span>
+            <button class="btn" id="tbl-prev">‹ Prev</button>
+            <button class="btn" id="tbl-next">Next ›</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  const POLL_MS = 3000;
+  const TOKEN_KEY = "recipe-admin-token";
+  const $ = (id) => document.getElementById(id);
+
+  // ---------- helpers ----------
+  const el = (tag, props = {}, ...children) => {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(props)) {
+      if (k === "class") n.className = v;
+      else if (k === "style") n.style.cssText = v;
+      else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+      else n.setAttribute(k, v);
+    }
+    for (const c of children.flat()) if (c != null) n.append(c instanceof Node ? c : String(c));
+    return n;
+  };
+  const svgEl = (tag, attrs = {}) => {
+    const n = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+    return n;
+  };
+  function bytes(n) {
+    if (n == null) return "—";
+    const u = ["B", "KB", "MB", "GB", "TB"];
+    let i = 0;
+    while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+    return `${n >= 100 || i === 0 ? Math.round(n) : n.toFixed(1)} ${u[i]}`;
+  }
+  const pct = (n) => `${n < 10 ? n.toFixed(1) : Math.round(n)}%`;
+  const ms = (n) => `${n < 10 ? n.toFixed(1) : Math.round(n)} ms`;
+  function duration(sec) {
+    sec = Math.floor(sec);
+    const d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60);
+    if (d) return `${d}d ${h}h`;
+    if (h) return `${h}h ${m}m`;
+    if (m) return `${m}m ${sec % 60}s`;
+    return `${sec}s`;
+  }
+  const clock = (t) => new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  function ago(iso) {
+    const s = (Date.now() - new Date(iso).getTime()) / 1000;
+    if (s < 60) return "just now";
+    if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+    if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+    return new Date(iso).toLocaleString();
+  }
+
+  // ---------- auth ----------
+  let token = null;
+  try { token = sessionStorage.getItem(TOKEN_KEY); } catch {}
+
+  async function api(method, path, body) {
+    const res = await fetch(path, {
+      method,
+      headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    if (res.status === 204) return null;
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const err = new Error(data.error || `HTTP ${res.status}`);
+      err.status = res.status;
+      throw err;
+    }
+    return data;
+  }
+
+  function setToken(t) {
+    token = t;
+    try { t ? sessionStorage.setItem(TOKEN_KEY, t) : sessionStorage.removeItem(TOKEN_KEY); } catch {}
+  }
+
+  function showLogin(message) {
+    stopPolling();
+    $("app").classList.add("hidden");
+    $("login").classList.remove("hidden");
+    $("login-error").textContent = message || "";
+  }
+
+  async function enter() {
+    const { user } = await api("GET", "/auth/me");
+    if (user.role !== "admin") {
+      setToken(null);
+      return showLogin(`${user.username} isn't an admin. Run "npm run make-admin -- ${user.username}" on the server.`);
+    }
+    $("who").textContent = `${user.username} · admin`;
+    $("login").classList.add("hidden");
+    $("app").classList.remove("hidden");
+    startPolling();
+    loadTableList();
+  }
+
+  $("login-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    $("login-btn").disabled = true;
+    $("login-error").textContent = "";
+    try {
+      const { token: t } = await api("POST", "/auth/login", { login: $("login-name").value.trim(), password: $("login-pass").value });
+      setToken(t);
+      $("login-pass").value = "";
+      await enter();
+    } catch (err) {
+      $("login-error").textContent = err.message;
+    } finally {
+      $("login-btn").disabled = false;
+    }
+  });
+
+  $("logout").addEventListener("click", async () => {
+    try { await api("POST", "/auth/logout"); } catch {}
+    setToken(null);
+    showLogin();
+  });
+
+  function handleApiError(err) {
+    if (err.status === 401) { setToken(null); showLogin("Your session ended — sign in again."); return true; }
+    if (err.status === 403) { setToken(null); showLogin(err.message); return true; }
+    return false;
+  }
+
+  // ---------- tabs ----------
+  let tab = "overview";
+  document.querySelectorAll("nav button").forEach((b) =>
+    b.addEventListener("click", () => {
+      tab = b.dataset.tab;
+      document.querySelectorAll("nav button").forEach((x) => x.setAttribute("aria-selected", String(x === b)));
+      document.querySelectorAll("[data-panel]").forEach((p) => p.classList.toggle("hidden", p.dataset.panel !== tab));
+      try { localStorage.setItem("recipe-admin-tab", tab); } catch {}
+      if (tab === "databases") { loadTableList(); if (current) loadTable(); }
+      redraw();
+    })
+  );
+
+  // ---------- polling ----------
+  let timer = null;
+  let lastStats = null;
+  let lastErrors = [];
+
+  async function poll() {
+    try {
+      const [stats, errors] = await Promise.all([api("GET", "/admin/api/stats"), api("GET", "/admin/api/errors")]);
+      lastStats = stats;
+      lastErrors = errors.groups;
+      $("status").className = "status-line";
+      $("status").textContent = `Live · updated ${clock(stats.now)} · refreshes every ${POLL_MS / 1000}s`;
+      redraw();
+    } catch (err) {
+      if (handleApiError(err)) return;
+      $("status").className = "status-line err";
+      $("status").textContent = `Can't reach the server (${err.message}). Retrying…`;
+    }
+  }
+  function startPolling() { stopPolling(); poll(); timer = setInterval(poll, POLL_MS); }
+  function stopPolling() { if (timer) clearInterval(timer); timer = null; }
+
+  function redraw() {
+    if (!lastStats) return;
+    const total = lastErrors.reduce((n, g) => n + g.count, 0);
+    $("err-badge").textContent = total ? `(${total})` : "";
+    if (tab === "overview") renderOverview(lastStats);
+    if (tab === "storage") renderStorage(lastStats.storage);
+    if (tab === "errors") renderErrors();
+  }
+  window.addEventListener("resize", () => redraw());
+
+  // ---------- overview ----------
+  function tile(label, value, sub) {
+    return el("div", { class: "tile" }, el("div", { class: "label" }, label), el("div", { class: "value num" }, value), sub ? el("div", { class: "sub" }, sub) : null);
+  }
+
+  function renderOverview(s) {
+    const last = s.samples[s.samples.length - 1] || {};
+    const storageTotal = s.storage.databases.reduce((n, d) => n + d.total, 0);
+    const errorGroups = lastErrors.length;
+    const fiveXX = lastErrors.filter((g) => g.status >= 500).reduce((n, g) => n + g.count, 0);
+    $("tiles").replaceChildren(
+      tile("CPU", pct(last.cpu || 0), `of one core · ${s.cores} cores in system`),
+      tile("Memory (RSS)", bytes(last.rss), `${pct((last.rss / s.systemMemory.total) * 100)} of ${bytes(s.systemMemory.total)} system RAM`),
+      tile("JS heap", bytes(last.heapUsed), `of ${bytes(last.heapTotal)} allocated`),
+      tile("Database storage", bytes(storageTotal), `${s.storage.databases.length} databases`),
+      tile("Requests", s.totalRequests.toLocaleString(), "since server start"),
+      tile("Errors", s.errorCount.toLocaleString(), `${errorGroups} groups · ${fiveXX} server errors`),
+      tile("Uptime", duration(s.uptimeSec), `Node ${s.node} · pid ${s.pid}`)
+    );
+    const xs = s.samples.map((p) => p.t);
+    lineChart($("chart-cpu"), xs, [{ name: "CPU", color: "--series-1", values: s.samples.map((p) => p.cpu), fmt: pct }], { min: 0, minMax: 5, fmt: pct, single: true });
+    lineChart($("chart-mem"), xs, [
+      { name: "RSS", color: "--series-1", values: s.samples.map((p) => p.rss), fmt: bytes },
+      { name: "Heap used", color: "--series-2", values: s.samples.map((p) => p.heapUsed), fmt: bytes },
+    ], { min: 0, fmt: bytes });
+    lineChart($("chart-req"), xs, [{ name: "Requests", color: "--series-1", values: s.samples.map((p) => p.requests), fmt: (v) => String(Math.round(v)) }], { min: 0, minMax: 4, fmt: (v) => String(Math.round(v)), single: true, integer: true });
+    lineChart($("chart-lat"), xs, [
+      { name: "Avg response", color: "--series-1", values: s.samples.map((p) => p.avgMs), fmt: ms },
+      { name: "Event-loop delay", color: "--series-2", values: s.samples.map((p) => p.loopMs), fmt: ms },
+    ], { min: 0, minMax: 5, fmt: ms });
+  }
+
+  // Nice round tick values between 0 and max.
+  function ticks(max, count = 4, integer = false) {
+    if (max <= 0) max = 1;
+    const raw = max / count;
+    const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    let step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw) || raw;
+    if (integer) step = Math.max(1, Math.ceil(step));
+    const top = Math.ceil(max / step) * step;
+    const out = [];
+    for (let v = 0; v <= top + step / 2; v += step) out.push(v);
+    return out;
+  }
+
+  function lineChart(host, xs, series, opts) {
+    const width = Math.max(host.clientWidth, 260);
+    const height = 200;
+    const pad = { l: 56, r: series.length > 1 ? 74 : 16, t: 10, b: 24 };
+    const w = width - pad.l - pad.r, h = height - pad.t - pad.b;
+    const all = series.flatMap((s) => s.values).filter((v) => Number.isFinite(v));
+    const maxV = Math.max(opts.minMax || 0, ...all, 0);
+    const tickVals = ticks(maxV, 4, opts.integer);
+    const yMax = tickVals[tickVals.length - 1] || 1;
+    const x0 = xs[0] ?? Date.now(), x1 = xs[xs.length - 1] ?? Date.now();
+    const sx = (t) => pad.l + (x1 === x0 ? w : ((t - x0) / (x1 - x0)) * w);
+    const sy = (v) => pad.t + h - (v / yMax) * h;
+
+    const svg = svgEl("svg", { viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": series.map((s) => s.name).join(" and ") + " over time" });
+    const axis = svgEl("g", { class: "axis" });
+    for (const v of tickVals) {
+      axis.append(svgEl("line", { class: "gridline", x1: pad.l, x2: pad.l + w, y1: sy(v), y2: sy(v) }));
+      const t = svgEl("text", { x: pad.l - 8, y: sy(v) + 4, "text-anchor": "end" });
+      t.textContent = opts.fmt(v);
+      axis.append(t);
+    }
+    if (xs.length > 1) {
+      for (const [t, anchor] of [[x0, "start"], [x1, "end"]]) {
+        const lab = svgEl("text", { x: sx(t), y: height - 6, "text-anchor": anchor });
+        lab.textContent = clock(t);
+        axis.append(lab);
+      }
+    }
+    svg.append(axis);
+
+    for (const s of series) {
+      const color = `var(${s.color})`;
+      const pts = s.values.map((v, i) => [sx(xs[i]), sy(Number.isFinite(v) ? v : 0)]);
+      if (!pts.length) continue;
+      const d = pts.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join("");
+      if (opts.single) {
+        svg.append(svgEl("path", { class: "area", d: `${d}L${pts[pts.length - 1][0]},${sy(0)}L${pts[0][0]},${sy(0)}Z`, fill: color }));
+      }
+      svg.append(svgEl("path", { class: "line", d, stroke: color }));
+      // Direct label at the line's end, for multi-series charts.
+      if (series.length > 1) {
+        const [ex, ey] = pts[pts.length - 1];
+        const lab = svgEl("text", { class: "end-label", x: ex + 6, y: ey + 4 });
+        lab.textContent = s.fmt(s.values[s.values.length - 1]);
+        svg.append(lab);
+      }
+    }
+
+    // hover: crosshair + tooltip
+    const cross = svgEl("line", { class: "cross", y1: pad.t, y2: pad.t + h, visibility: "hidden" });
+    const dots = series.map((s) => svgEl("circle", { class: "dot", r: 4, fill: `var(${s.color})`, visibility: "hidden" }));
+    svg.append(cross, ...dots);
+    const hit = svgEl("rect", { x: pad.l, y: 0, width: w, height, fill: "transparent" });
+    svg.append(hit);
+    const tip = el("div", { class: "tooltip hidden" });
+    const move = (evt) => {
+      if (!xs.length) return;
+      const rect = svg.getBoundingClientRect();
+      const px = ((evt.clientX - rect.left) / rect.width) * width;
+      let i = 0, best = Infinity;
+      xs.forEach((t, j) => { const dd = Math.abs(sx(t) - px); if (dd < best) { best = dd; i = j; } });
+      const x = sx(xs[i]);
+      cross.setAttribute("x1", x); cross.setAttribute("x2", x); cross.setAttribute("visibility", "visible");
+      series.forEach((s, k) => { dots[k].setAttribute("cx", x); dots[k].setAttribute("cy", sy(s.values[i] || 0)); dots[k].setAttribute("visibility", "visible"); });
+      tip.replaceChildren(
+        el("div", { class: "t" }, clock(xs[i])),
+        ...series.map((s) => el("div", { class: "row" }, el("i", { style: `background:var(${s.color})` }), s.name, el("b", { class: "num" }, s.fmt(s.values[i] || 0))))
+      );
+      tip.classList.remove("hidden");
+      const left = (x / width) * rect.width;
+      tip.style.top = "6px";
+      tip.style.left = left > rect.width / 2 ? `${left - tip.offsetWidth - 12}px` : `${left + 12}px`;
+    };
+    const leave = () => { cross.setAttribute("visibility", "hidden"); dots.forEach((d) => d.setAttribute("visibility", "hidden")); tip.classList.add("hidden"); };
+    hit.addEventListener("pointermove", move);
+    hit.addEventListener("pointerleave", leave);
+    host.replaceChildren(svg, tip);
+  }
+
+  // ---------- storage ----------
+  function hbars(host, items) {
+    const max = Math.max(1, ...items.map((i) => i.value || 0));
+    host.replaceChildren(...items.map((i) =>
+      el("div", { class: "hbar-row", title: `${i.name}: ${bytes(i.value)}` },
+        el("div", { class: "name" }, i.name),
+        el("div", { class: "hbar-track" }, el("div", { class: "hbar-fill", style: `width:${((i.value || 0) / max) * 100}%` })),
+        el("div", { class: "v num" }, i.label ?? bytes(i.value)))
+    ));
+  }
+
+  function renderStorage(st) {
+    const total = st.databases.reduce((n, d) => n + d.total, 0);
+    const rows = st.databases.reduce((n, d) => n + d.tables.reduce((m, t) => m + t.rows, 0), 0);
+    const tiles = [
+      tile("Databases total", bytes(total), `${st.databases.length} SQLite files`),
+      tile("Rows", rows.toLocaleString(), `across ${st.databases.reduce((n, d) => n + d.tables.length, 0)} tables`),
+      tile("Other files", bytes(st.otherBytes), "backups etc. in the data folder"),
+    ];
+    if (st.disk) {
+      const used = st.disk.total - st.disk.free;
+      const t = tile("Disk", `${bytes(st.disk.free)} free`, `of ${bytes(st.disk.total)}`);
+      t.insertBefore(el("div", { class: "meter", title: `${pct((used / st.disk.total) * 100)} used` }, el("div", { style: `width:${(used / st.disk.total) * 100}%` })), t.lastChild);
+      tiles.push(t);
+    }
+    $("storage-tiles").replaceChildren(...tiles);
+    hbars($("storage-dbs"), st.databases.map((d) => ({ name: d.file, value: d.total })));
+    hbars($("storage-tables"), st.databases.flatMap((d) => d.tables.map((t) => ({ name: `${d.name}.${t.name}`, value: t.bytes, label: `${bytes(t.bytes)} · ${t.rows.toLocaleString()} rows` }))).sort((a, b) => (b.value || 0) - (a.value || 0)));
+    $("storage-dir").textContent = st.dataDir;
+    $("storage-files").replaceChildren(
+      el("thead", {}, el("tr", {}, el("th", {}, "Database"), el("th", { class: "n" }, ".db"), el("th", { class: "n" }, "-wal"), el("th", { class: "n" }, "-shm"), el("th", { class: "n" }, "Total"), el("th", { class: "n" }, "Tables"))),
+      el("tbody", {}, st.databases.map((d) => el("tr", {},
+        el("td", {}, d.file),
+        el("td", { class: "n" }, bytes(d.files.db)),
+        el("td", { class: "n" }, bytes(d.files.wal)),
+        el("td", { class: "n" }, bytes(d.files.shm)),
+        el("td", { class: "n" }, el("b", {}, bytes(d.total))),
+        el("td", { class: "n" }, d.tables.length))))
+    );
+  }
+
+  // ---------- errors ----------
+  let errFilter = "all";
+  const openGroups = new Set();
+  document.querySelectorAll("[data-filter]").forEach((b) =>
+    b.addEventListener("click", () => {
+      errFilter = b.dataset.filter;
+      document.querySelectorAll("[data-filter]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+      renderErrors();
+    })
+  );
+  $("clear-errors").addEventListener("click", async () => {
+    if (!confirm("Clear every recorded error?")) return;
+    try { await api("DELETE", "/admin/api/errors"); lastErrors = []; renderErrors(); poll(); }
+    catch (err) { if (!handleApiError(err)) alert(err.message); }
+  });
+
+  function renderErrors() {
+    const groups = lastErrors.filter((g) => errFilter === "all" || String(g.status)[0] === errFilter);
+    if (!groups.length) {
+      $("errors").replaceChildren(el("div", { class: "empty" }, lastErrors.length ? "No errors of this kind." : "No errors recorded since the server started. 🎉"));
+      return;
+    }
+    $("errors").replaceChildren(...groups.map((g) => {
+      const d = el("details", { class: "err-group" },
+        el("summary", {},
+          el("span", { class: `badge ${g.status >= 500 ? "s5" : "s4"}` }, g.status >= 500 ? `✕ ${g.status}` : `! ${g.status}`),
+          el("div", {}, el("div", { class: "err-msg" }, g.message), el("div", { class: "err-route" }, `${g.method} ${g.route}`)),
+          el("div", { class: "err-count" }, el("b", { class: "num" }, g.count.toLocaleString()), el("div", {}, `last ${ago(g.lastSeen)}`))),
+        el("div", { class: "err-body" },
+          el("div", { class: "card-sub" }, `First seen ${new Date(g.firstSeen).toLocaleString()} · last seen ${new Date(g.lastSeen).toLocaleString()}`),
+          el("div", { class: "table-wrap" }, el("table", {},
+            el("thead", {}, el("tr", {}, el("th", {}, "When"), el("th", {}, "URL"), el("th", {}, "User id"))),
+            el("tbody", {}, g.recent.map((r) => el("tr", {}, el("td", {}, new Date(r.at).toLocaleString()), el("td", { class: "cell" }, r.url), el("td", {}, r.userId ?? "—")))))),
+          g.stack ? el("pre", {}, g.stack) : null));
+      if (openGroups.has(g.key)) d.open = true;
+      d.addEventListener("toggle", () => (d.open ? openGroups.add(g.key) : openGroups.delete(g.key)));
+      return d;
+    }));
+  }
+
+  // ---------- databases ----------
+  let current = null; // { db, table }
+  let tblState = { page: 1, sort: null, dir: "asc", q: "", pageSize: 50 };
+  let lastTable = null;
+
+  async function loadTableList() {
+    try {
+      const { databases } = await api("GET", "/admin/api/tables");
+      $("db-side").replaceChildren(...databases.flatMap((d) => [
+        el("h3", {}, d.file),
+        ...d.tables.map((t) => el("button", {
+          "aria-current": String(current?.db === d.name && current?.table === t.name),
+          onclick: () => { current = { db: d.name, table: t.name }; tblState = { ...tblState, page: 1, sort: null, dir: "asc", q: "" }; $("tbl-search").value = ""; loadTableList(); loadTable(); },
+        }, t.name, el("span", { class: "c num" }, t.rows.toLocaleString()))),
+      ]));
+      if (!current && databases[0]?.tables[0]) {
+        current = { db: databases[0].name, table: databases[0].tables[0].name };
+        loadTableList();
+        loadTable();
+      }
+    } catch (err) { handleApiError(err); }
+  }
+
+  async function loadTable() {
+    if (!current) return;
+    const p = new URLSearchParams({ db: current.db, table: current.table, page: tblState.page, pageSize: tblState.pageSize, dir: tblState.dir, q: tblState.q });
+    if (tblState.sort) p.set("sort", tblState.sort);
+    try {
+      const data = await api("GET", `/admin/api/table?${p}`);
+      lastTable = data;
+      tblState.page = data.page;
+      renderTable(data);
+    } catch (err) {
+      if (!handleApiError(err)) $("tbl").replaceChildren(el("tbody", {}, el("tr", {}, el("td", {}, err.message))));
+    }
+  }
+
+  function renderTable(t) {
+    $("tbl-title").textContent = `${t.db}.db › ${t.table}`;
+    const numeric = t.columns.map((c) => /INT|REAL|NUM|FLOA|DOUB/i.test(c.type));
+    $("tbl").replaceChildren(
+      el("thead", {}, el("tr", {}, t.columns.map((c, i) => {
+        const arrow = t.sort === c.name ? (t.dir === "asc" ? " ▲" : " ▼") : "";
+        return el("th", {
+          class: `sortable${numeric[i] ? " n" : ""}`, title: `${c.type || "any"}${c.pk ? " · primary key" : ""} — click to sort`,
+          onclick: () => {
+            if (tblState.sort === c.name) tblState.dir = tblState.dir === "asc" ? "desc" : "asc";
+            else { tblState.sort = c.name; tblState.dir = "asc"; }
+            tblState.page = 1; loadTable();
+          },
+        }, c.name, c.pk ? el("span", { class: "pk" }, "PK") : null, arrow);
+      }))),
+      el("tbody", {}, t.rows.length
+        ? t.rows.map((r) => el("tr", {}, r.map((v, i) => el("td", { class: numeric[i] ? "n" : "cell", title: v == null ? "NULL" : String(v) },
+            v == null ? el("span", { class: "null" }, "NULL") : t.columns[i].hidden ? el("span", { class: "masked" }, v) : String(v)))))
+        : el("tr", {}, el("td", { colspan: t.columns.length, style: "text-align:center;color:var(--muted);padding:24px" }, t.q ? "No rows match." : "This table is empty.")))
+    );
+    const first = t.total ? (t.page - 1) * t.pageSize + 1 : 0;
+    $("tbl-info").textContent = `${first}–${first + t.rows.length - (t.rows.length ? 1 : 0)} of ${t.total.toLocaleString()} · page ${t.page} / ${t.pageCount}`;
+    $("tbl-prev").disabled = t.page <= 1;
+    $("tbl-next").disabled = t.page >= t.pageCount;
+  }
+
+  let searchTimer = null;
+  $("tbl-search").addEventListener("input", () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => { tblState.q = $("tbl-search").value.trim(); tblState.page = 1; loadTable(); }, 300);
+  });
+  $("tbl-size").addEventListener("change", () => { tblState.pageSize = Number($("tbl-size").value); tblState.page = 1; loadTable(); });
+  $("tbl-prev").addEventListener("click", () => { tblState.page--; loadTable(); });
+  $("tbl-next").addEventListener("click", () => { tblState.page++; loadTable(); });
+  $("tbl-refresh").addEventListener("click", () => { loadTableList(); loadTable(); });
+
+  // ---------- start ----------
+  try {
+    const saved = localStorage.getItem("recipe-admin-tab");
+    if (saved) document.querySelector(`nav button[data-tab="${saved}"]`)?.click();
+  } catch {}
+  if (token) enter().catch((err) => { setToken(null); showLogin(err.status ? err.message : "Couldn't reach the server."); });
+  else showLogin();
+})();
+</script>
+</body>
+</html>
