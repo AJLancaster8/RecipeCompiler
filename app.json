@@ -30,7 +30,14 @@
           "backgroundColor": "#FAF7F2"
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Recipe App uses your photos to set your profile picture.",
+          "cameraPermission": "Recipe App uses the camera to take your profile picture."
+        }
+      ]
     ],
     "extra": {
       "router": {},

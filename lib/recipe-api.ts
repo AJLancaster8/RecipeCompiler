@@ -30,7 +30,15 @@ export type User = {
   email: string;
   role: "user" | "admin";
   createdAt: string;
+  // Server path of the profile picture (e.g. "/users/3/avatar?v=..."), or
+  // null if none is set. Turn it into a full URL with apiUrl().
+  avatarUrl: string | null;
 };
+
+// A full URL for a path on the recipe server (e.g. a profile picture).
+export function apiUrl(path: string): string {
+  return `${API_BASE_URL}${path}`;
+}
 
 type AuthResponse = { token: string; user: User };
 
@@ -101,6 +109,9 @@ export const authApi = {
     request<AuthResponse>("POST", "/auth/login", { login, password }),
   me: () => request<{ user: User }>("GET", "/auth/me"),
   logout: () => request<void>("POST", "/auth/logout"),
+  // `base64` is the image's bytes (JPEG, PNG or WebP, 2 MB max).
+  setAvatar: (base64: string) => request<{ user: User }>("PUT", "/auth/avatar", { image: base64 }),
+  removeAvatar: () => request<{ user: User }>("DELETE", "/auth/avatar"),
 };
 
 export const recipeApi = {

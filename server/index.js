@@ -96,6 +96,14 @@ accountsDb.exec(`
     expires_at  TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS sessions_user ON sessions (user_id);
+
+  -- Profile pictures (JPEG/PNG/WebP, at most 2 MB), one per account.
+  CREATE TABLE IF NOT EXISTS avatars (
+    user_id     INTEGER PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE,
+    mime        TEXT NOT NULL,
+    data        BLOB NOT NULL,
+    updated_at  TEXT NOT NULL
+  );
 `);
 
 // ---------- saved-recipes database ----------
@@ -269,6 +277,15 @@ const accountsSql = {
   setRole: accountsDb.prepare("UPDATE users SET role = ? WHERE id = ?"),
   setPassword: accountsDb.prepare("UPDATE users SET password_hash = ? WHERE id = ?"),
   deleteSessionsForUser: accountsDb.prepare("DELETE FROM sessions WHERE user_id = ?"),
+
+  avatarVersion: accountsDb.prepare("SELECT updated_at FROM avatars WHERE user_id = ?"),
+  avatarFor: accountsDb.prepare("SELECT mime, data, updated_at FROM avatars WHERE user_id = ?"),
+  setAvatar: accountsDb.prepare(`
+    INSERT INTO avatars (user_id, mime, data, updated_at) VALUES (?, ?, ?, ?)
+    ON CONFLICT (user_id) DO UPDATE SET
+      mime = excluded.mime, data = excluded.data, updated_at = excluded.updated_at
+  `),
+  deleteAvatar: accountsDb.prepare("DELETE FROM avatars WHERE user_id = ?"),
 
   insertSession: accountsDb.prepare(
     "INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)"
@@ -529,7 +546,35 @@ function userFromRequest(req) {
 
 // Only ever sent to the account's own owner (sign-in responses and /auth/me).
 function publicUser(u) {
-  return { id: u.id, username: u.username, email: u.email, role: u.role, createdAt: u.created_at };
+  return {
+    id: u.id,
+    username: u.username,
+    email: u.email,
+    role: u.role,
+    createdAt: u.created_at,
+    avatarUrl: avatarUrlFor(u.id),
+  };
+}
+
+// Path of a user's profile picture, or null if they haven't set one. The
+// ?v= changes with every upload so apps don't show a cached old picture.
+function avatarUrlFor(userId) {
+  const row = accountsSql.avatarVersion.get(userId);
+  return row ? `/users/${userId}/avatar?v=${encodeURIComponent(row.updated_at)}` : null;
+}
+
+const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
+
+// The image type from its first bytes — the client's word isn't trusted.
+function imageTypeOf(buf) {
+  if (buf.length > 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
+  if (buf.length > 8 && buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+    return "image/png";
+  }
+  if (buf.length > 12 && buf.toString("ascii", 0, 4) === "RIFF" && buf.toString("ascii", 8, 12) === "WEBP") {
+    return "image/webp";
+  }
+  return null;
 }
 
 // Simple brute-force guard: after 10 failed sign-ins for an account from
@@ -649,13 +694,13 @@ function send(res, status, data) {
   res.end(body);
 }
 
-function readJsonBody(req) {
+function readJsonBody(req, maxBytes = MAX_BODY_BYTES) {
   return new Promise((resolve, reject) => {
     let size = 0;
     const chunks = [];
     req.on("data", (chunk) => {
       size += chunk.length;
-      if (size > MAX_BODY_BYTES) {
+      if (size > maxBytes) {
         reject(Object.assign(new Error("Body too large"), { status: 413 }));
         req.destroy();
         return;
@@ -754,6 +799,27 @@ async function handleAuth(req, res, action) {
   if (action === "me" && req.method === "GET") {
     const user = userFromRequest(req);
     if (!user) return send(res, 401, NOT_SIGNED_IN);
+    return send(res, 200, { user: publicUser(user) });
+  }
+
+  // PUT /auth/avatar { image: <base64 JPEG/PNG/WebP> } → set your picture
+  // DELETE /auth/avatar                               → remove it
+  if (action === "avatar" && (req.method === "PUT" || req.method === "DELETE")) {
+    const user = userFromRequest(req);
+    if (!user) return send(res, 401, NOT_SIGNED_IN);
+    if (req.method === "DELETE") {
+      accountsSql.deleteAvatar.run(user.id);
+      return send(res, 200, { user: publicUser(user) });
+    }
+    // base64 is 4/3 the size of the image, plus a little JSON.
+    const body = await readJsonBody(req, Math.ceil((MAX_AVATAR_BYTES * 4) / 3) + 1024);
+    const b64 = asString(body?.image).replace(/^data:[^,]*,/, "");
+    const data = Buffer.from(b64, "base64");
+    if (data.length === 0) return send(res, 400, { error: "No image was sent" });
+    if (data.length > MAX_AVATAR_BYTES) return send(res, 413, { error: "That picture is too large (2 MB max)" });
+    const mime = imageTypeOf(data);
+    if (!mime) return send(res, 400, { error: "Profile pictures must be JPEG, PNG or WebP images" });
+    accountsSql.setAvatar.run(user.id, mime, data, new Date().toISOString());
     return send(res, 200, { user: publicUser(user) });
   }
 
@@ -918,6 +984,24 @@ async function handle(req, res) {
   if (parts[0] === "auth" && parts.length === 2) return handleAuth(req, res, parts[1]);
 
   if (parts[0] === "admin") return admin.handleAdmin(req, res, parts, url);
+
+  // GET /users/:id/avatar → the profile picture itself. Public (no sign-in)
+  // so image components can load it straight from the URL.
+  if (parts[0] === "users" && parts.length === 3 && /^\d+$/.test(parts[1]) && parts[2] === "avatar") {
+    if (req.method !== "GET") return send(res, 405, { error: "Method not allowed" });
+    const avatar = accountsSql.avatarFor.get(Number(parts[1]));
+    if (!avatar) return send(res, 404, { error: "No profile picture" });
+    const data = Buffer.from(avatar.data);
+    res.writeHead(200, {
+      "Content-Type": avatar.mime,
+      "Content-Length": data.length,
+      "X-Content-Type-Options": "nosniff",
+      "Access-Control-Allow-Origin": "*",
+      // The URL changes (?v=) whenever the picture does, so it can be cached.
+      "Cache-Control": url.searchParams.has("v") ? "public, max-age=31536000, immutable" : "no-cache",
+    });
+    return res.end(data);
+  }
 
   if (parts[0] === "recipes") {
     const user = userFromRequest(req);

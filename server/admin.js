@@ -30,6 +30,7 @@ const MAX_PAGE_SIZE = 200;
 const HIDDEN_COLUMNS = {
   "accounts.users.password_hash": () => "•••••• (hidden)",
   "accounts.sessions.token_hash": (v) => `${String(v).slice(0, 8)}…`,
+  "accounts.avatars.data": (v) => `<image, ${(v.length / 1024).toFixed(1)} KB>`,
 };
 
 const ADMIN_HTML_PATH = path.join(__dirname, "admin.html");

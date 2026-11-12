@@ -1,25 +1,25 @@
-import { Stack } from "expo-router";
-import { ActivityIndicator, Text, TouchableOpacity, View } from "react-native";
-import { Alert } from "../lib/alert";
+import { Stack, useRouter } from "expo-router";
+import { ActivityIndicator, TouchableOpacity, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { Avatar } from "../components/avatar";
 import { BurgerMenuButton } from "../components/burger-menu";
 import { AuthProvider, useAuth } from "../lib/auth";
 import { PlanProvider } from "./plan-store";
 import { RecipeProvider } from "./recipe-store";
 
-function SignOutButton() {
-  const { user, signOut } = useAuth();
+// Your profile picture in the top-right of the home screen; opens My Account.
+function AccountButton() {
+  const { user } = useAuth();
+  const router = useRouter();
   if (!user) return null;
-  const confirm = () =>
-    Alert.alert("Sign out?", `You're signed in as ${user.username}.`, [
-      { text: "Cancel", style: "cancel" },
-      { text: "Sign Out", style: "destructive", onPress: () => signOut() },
-    ]);
   return (
-    <TouchableOpacity onPress={confirm} hitSlop={8}>
-      <Text style={{ color: "#8A5A2E", fontWeight: "600", fontSize: 15 }}>
-        Sign Out
-      </Text>
+    <TouchableOpacity
+      onPress={() => router.push("/account")}
+      hitSlop={8}
+      accessibilityRole="button"
+      accessibilityLabel="My account"
+    >
+      <Avatar username={user.username} avatarUrl={user.avatarUrl} size={32} />
     </TouchableOpacity>
   );
 }
@@ -67,9 +67,10 @@ function AppStack() {
               options={{
                 title: "My Recipes",
                 headerLeft: () => <BurgerMenuButton />,
-                headerRight: () => <SignOutButton />,
+                headerRight: () => <AccountButton />,
               }}
             />
+            <Stack.Screen name="account" options={{ title: "My Account" }} />
             <Stack.Screen name="discover" options={{ title: "Discover Recipes" }} />
             <Stack.Screen name="saved" options={{ title: "Saved Recipes" }} />
             <Stack.Screen name="new-recipe" options={{ title: "New Recipe" }} />

@@ -7,6 +7,11 @@ type MenuItem = { label: string; description: string; href: Href };
 
 const MENU_ITEMS: MenuItem[] = [
   {
+    label: "My Account",
+    description: "Your profile picture, details and sign out",
+    href: "/account",
+  },
+  {
     label: "Discover Recipes",
     description: "Browse recipes everyone has published",
     href: "/discover",

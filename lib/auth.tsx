@@ -23,6 +23,8 @@ type AuthContextType = {
   signIn: (login: string, password: string) => Promise<void>;
   register: (username: string, email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
+  // Sets or removes (null) the profile picture. `base64` is JPEG/PNG/WebP data.
+  setAvatar: (base64: string | null) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -93,8 +95,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await forgetSession();
   };
 
+  const setAvatar = async (base64: string | null) => {
+    const { user } = base64 === null ? await authApi.removeAvatar() : await authApi.setAvatar(base64);
+    setUser(user);
+  };
+
   return (
-    <AuthContext.Provider value={{ user, initializing, signIn, register, signOut }}>
+    <AuthContext.Provider value={{ user, initializing, signIn, register, signOut, setAvatar }}>
       {children}
     </AuthContext.Provider>
   );
