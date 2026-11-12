@@ -6,6 +6,7 @@ import {
   useEffect,
   useState,
 } from "react";
+import { cancelStepNotification } from "./notifications";
 import { advanceIdCounter } from "./recipe-store";
 
 export type PlanIngredientAmount = {
@@ -64,9 +65,20 @@ const PLANS_FILE = FileSystem.documentDirectory + "plans.json";
 type PlanContextType = {
   plans: Plan[];
   addPlan: (plan: Plan) => Promise<void>;
+  // Updates a saved plan, or the temporary one if that's the plan given.
   updatePlan: (plan: Plan) => Promise<void>;
   deletePlan: (id: number) => Promise<void>;
   loading: boolean;
+
+  // "Make This": one temporary plan for cooking a single recipe. It works
+  // like any plan (timers, checklist) but is only kept in memory — never
+  // written to disk or listed in Saved Plans — and is gone once finished,
+  // replaced by another "Make This", or the app is closed.
+  tempPlan: Plan | null;
+  startTempPlan: (plan: Plan) => Promise<void>;
+  endTempPlan: () => Promise<void>;
+  // Keeps the temporary plan for good by moving it into Saved Plans.
+  saveTempPlan: () => Promise<void>;
 };
 
 const PlanContext = createContext<PlanContextType | undefined>(undefined);
@@ -174,6 +186,32 @@ async function writePlansToDisk(plans: Plan[]): Promise<void> {
 export function PlanProvider({ children }: { children: ReactNode }) {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [loading, setLoading] = useState(true);
+  const [tempPlan, setTempPlan] = useState<Plan | null>(null);
+
+  // Running timers have OS notifications scheduled; cancel them when the
+  // temporary plan goes away so nobody gets pinged for a finished session.
+  const cancelTimers = async (plan: Plan | null) => {
+    if (!plan) return;
+    await Promise.all(plan.activeSteps.map((a) => cancelStepNotification(a.notificationId)));
+  };
+
+  const startTempPlan = async (plan: Plan) => {
+    await cancelTimers(tempPlan);
+    setTempPlan(plan);
+  };
+
+  const endTempPlan = async () => {
+    await cancelTimers(tempPlan);
+    setTempPlan(null);
+  };
+
+  const saveTempPlan = async () => {
+    if (!tempPlan) return;
+    const updated = [...plans, tempPlan]; // timers keep running in the saved copy
+    setPlans(updated);
+    setTempPlan(null);
+    await writePlansToDisk(updated);
+  };
 
   useEffect(() => {
     (async () => {
@@ -190,6 +228,10 @@ export function PlanProvider({ children }: { children: ReactNode }) {
   };
 
   const updatePlan = async (plan: Plan) => {
+    if (tempPlan && plan.id === tempPlan.id) {
+      setTempPlan(plan); // memory only
+      return;
+    }
     const updated = plans.map((p) => (p.id === plan.id ? plan : p));
     setPlans(updated);
     await writePlansToDisk(updated);
@@ -203,7 +245,17 @@ export function PlanProvider({ children }: { children: ReactNode }) {
 
   return (
     <PlanContext.Provider
-      value={{ plans, addPlan, updatePlan, deletePlan, loading }}
+      value={{
+        plans,
+        addPlan,
+        updatePlan,
+        deletePlan,
+        loading,
+        tempPlan,
+        startTempPlan,
+        endTempPlan,
+        saveTempPlan,
+      }}
     >
       {children}
     </PlanContext.Provider>

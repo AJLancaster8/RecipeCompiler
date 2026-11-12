@@ -37,7 +37,9 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { promisify } = require("node:util");
+const os = require("node:os");
 const { createAdmin } = require("./admin");
+const { createWebsite } = require("./website");
 
 let DatabaseSync;
 try {
@@ -54,6 +56,8 @@ const scrypt = promisify(crypto.scrypt);
 
 const PORT = Number(process.env.PORT) || 3000;
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
+// The website's files (the Expo web build — `npm run build:web`).
+const WEB_DIR = process.env.WEB_DIR || path.join(__dirname, "..", "dist");
 const ACCOUNTS_DB_PATH = path.join(DATA_DIR, "accounts.db");
 const RECIPES_DB_PATH = path.join(DATA_DIR, "recipes.db");
 const SAVED_DB_PATH = path.join(DATA_DIR, "saved.db");
@@ -105,6 +109,18 @@ accountsDb.exec(`
     updated_at  TEXT NOT NULL
   );
 `);
+
+// Migration: profile pictures used to be served by user id, so anyone could
+// download everyone's by counting. Each now has a random token instead
+// (served at /api/avatars/<token>, changing with every upload).
+if (!accountsDb.prepare("PRAGMA table_info(avatars)").all().some((c) => c.name === "token")) {
+  accountsDb.exec("ALTER TABLE avatars ADD COLUMN token TEXT;");
+  const setToken = accountsDb.prepare("UPDATE avatars SET token = ? WHERE user_id = ?");
+  for (const { user_id } of accountsDb.prepare("SELECT user_id FROM avatars").all()) {
+    setToken.run(crypto.randomBytes(18).toString("base64url"), user_id);
+  }
+}
+accountsDb.exec("CREATE UNIQUE INDEX IF NOT EXISTS avatars_token ON avatars (token);");
 
 // ---------- saved-recipes database ----------
 
@@ -204,6 +220,19 @@ if (!recipesDb.prepare("PRAGMA table_info(recipes)").all().some((c) => c.name ==
 }
 recipesDb.exec("CREATE INDEX IF NOT EXISTS recipes_public ON recipes (is_public);");
 
+// A picture per recipe (JPEG/PNG/WebP, at most 3 MB). Served at
+// /recipe-images/<token>; the token is random and changes with every upload,
+// so a private recipe's picture can't be found by guessing ids.
+recipesDb.exec(`
+  CREATE TABLE IF NOT EXISTS recipe_images (
+    recipe_id   INTEGER PRIMARY KEY REFERENCES recipes (id) ON DELETE CASCADE,
+    token       TEXT NOT NULL UNIQUE,
+    mime        TEXT NOT NULL,
+    data        BLOB NOT NULL,
+    updated_at  TEXT NOT NULL
+  );
+`);
+
 function migrateCombinedDatabase() {
   const tables = new Set(
     recipesDb.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((t) => t.name)
@@ -278,12 +307,13 @@ const accountsSql = {
   setPassword: accountsDb.prepare("UPDATE users SET password_hash = ? WHERE id = ?"),
   deleteSessionsForUser: accountsDb.prepare("DELETE FROM sessions WHERE user_id = ?"),
 
-  avatarVersion: accountsDb.prepare("SELECT updated_at FROM avatars WHERE user_id = ?"),
-  avatarFor: accountsDb.prepare("SELECT mime, data, updated_at FROM avatars WHERE user_id = ?"),
+  avatarToken: accountsDb.prepare("SELECT token FROM avatars WHERE user_id = ?"),
+  allAvatarTokens: accountsDb.prepare("SELECT user_id, token FROM avatars"),
+  avatarByToken: accountsDb.prepare("SELECT mime, data FROM avatars WHERE token = ?"),
   setAvatar: accountsDb.prepare(`
-    INSERT INTO avatars (user_id, mime, data, updated_at) VALUES (?, ?, ?, ?)
+    INSERT INTO avatars (user_id, mime, data, updated_at, token) VALUES (?, ?, ?, ?, ?)
     ON CONFLICT (user_id) DO UPDATE SET
-      mime = excluded.mime, data = excluded.data, updated_at = excluded.updated_at
+      mime = excluded.mime, data = excluded.data, updated_at = excluded.updated_at, token = excluded.token
   `),
   deleteAvatar: accountsDb.prepare("DELETE FROM avatars WHERE user_id = ?"),
 
@@ -333,6 +363,15 @@ const recipesSql = {
     "SELECT * FROM step_ingredients ORDER BY recipe_id, step_position, position"
   ),
   distinctAuthors: recipesDb.prepare("SELECT DISTINCT author_id FROM recipes"),
+  imageToken: recipesDb.prepare("SELECT token FROM recipe_images WHERE recipe_id = ?"),
+  allImageTokens: recipesDb.prepare("SELECT recipe_id, token FROM recipe_images"),
+  imageByToken: recipesDb.prepare("SELECT mime, data FROM recipe_images WHERE token = ?"),
+  setImage: recipesDb.prepare(`
+    INSERT INTO recipe_images (recipe_id, token, mime, data, updated_at) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT (recipe_id) DO UPDATE SET
+      token = excluded.token, mime = excluded.mime, data = excluded.data, updated_at = excluded.updated_at
+  `),
+  deleteImage: recipesDb.prepare("DELETE FROM recipe_images WHERE recipe_id = ?"),
   claimAuthorless: recipesDb.prepare(`UPDATE recipes SET author_id = ? WHERE author_id = ${NO_AUTHOR}`),
 };
 
@@ -383,7 +422,9 @@ function saveRecipe(recipe) {
 
 // Turn database rows back into the recipe shape the app uses.
 // authorName comes from accounts.db (looked up by author_id).
-function assemble(row, ingredientRows, stepRows, linkRows, authorName) {
+const recipeImageUrl = (token) => (token ? `/api/recipe-images/${token}` : null);
+
+function assemble(row, ingredientRows, stepRows, linkRows, authorName, authorAvatarUrl, imageToken) {
   return {
     id: row.id,
     name: row.name,
@@ -405,6 +446,8 @@ function assemble(row, ingredientRows, stepRows, linkRows, authorName) {
     })),
     authorId: row.author_id,
     authorName: authorName ?? null,
+    authorAvatarUrl: authorAvatarUrl ?? null,
+    imageUrl: recipeImageUrl(imageToken),
     isPublic: row.is_public === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -420,7 +463,9 @@ function readStoredRecipe(id) {
     recipesSql.ingredientsFor.all(id),
     recipesSql.stepsFor.all(id),
     recipesSql.stepIngredientsFor.all(id),
-    author?.username
+    author?.username,
+    avatarUrlFor(row.author_id),
+    recipesSql.imageToken.get(id)?.token
   );
 }
 
@@ -439,13 +484,18 @@ function listStoredRecipes(include) {
   const steps = group(recipesSql.allSteps.all());
   const links = group(recipesSql.allStepIngredients.all());
   const usernames = new Map(accountsSql.allUsernames.all().map((u) => [u.id, u.username]));
+  const avatars = new Map(accountsSql.allAvatarTokens.all().map((a) => [a.user_id, a.token]));
+  const images = new Map(recipesSql.allImageTokens.all().map((i) => [i.recipe_id, i.token]));
+  const avatarUrl = (id) => avatarPath(avatars.get(id));
   return recipesSql.allRecipes.all().filter(include).map((row) =>
     assemble(
       row,
       ingredients.get(row.id) || [],
       steps.get(row.id) || [],
       links.get(row.id) || [],
-      usernames.get(row.author_id)
+      usernames.get(row.author_id),
+      avatarUrl(row.author_id),
+      images.get(row.id)
     )
   );
 }
@@ -557,13 +607,27 @@ function publicUser(u) {
 }
 
 // Path of a user's profile picture, or null if they haven't set one. The
-// ?v= changes with every upload so apps don't show a cached old picture.
+// token is random and changes with every upload.
+const avatarPath = (token) => (token ? `/api/avatars/${token}` : null);
 function avatarUrlFor(userId) {
-  const row = accountsSql.avatarVersion.get(userId);
-  return row ? `/users/${userId}/avatar?v=${encodeURIComponent(row.updated_at)}` : null;
+  return avatarPath(accountsSql.avatarToken.get(userId)?.token);
 }
 
 const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
+const MAX_RECIPE_IMAGE_BYTES = 3 * 1024 * 1024;
+
+// Sends image bytes. `cacheForever` when the URL changes with the image.
+function sendImage(res, mime, bytes, cacheForever) {
+  const data = Buffer.from(bytes);
+  res.writeHead(200, {
+    "Content-Type": mime,
+    "Content-Length": data.length,
+    "X-Content-Type-Options": "nosniff",
+    "Content-Security-Policy": "default-src 'none'",
+    "Cache-Control": cacheForever ? "public, max-age=31536000, immutable" : "no-cache",
+  });
+  res.end(data);
+}
 
 // The image type from its first bytes — the client's word isn't trusted.
 function imageTypeOf(buf) {
@@ -687,9 +751,10 @@ function send(res, status, data) {
   if (status >= 400) res.errorMessage = data?.error; // for the admin error list
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type,Authorization",
+    // Account and recipe data: never cached, never treated as anything but data.
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+    "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
   });
   res.end(body);
 }
@@ -721,6 +786,8 @@ function readJsonBody(req, maxBytes = MAX_BODY_BYTES) {
 const NOT_SIGNED_IN = { error: "You need to sign in" };
 
 // Admin dashboard at /admin (see server/admin.js).
+const website = createWebsite(WEB_DIR);
+
 const admin = createAdmin({
   databases: {
     accounts: { db: accountsDb, path: ACCOUNTS_DB_PATH },
@@ -819,7 +886,7 @@ async function handleAuth(req, res, action) {
     if (data.length > MAX_AVATAR_BYTES) return send(res, 413, { error: "That picture is too large (2 MB max)" });
     const mime = imageTypeOf(data);
     if (!mime) return send(res, 400, { error: "Profile pictures must be JPEG, PNG or WebP images" });
-    accountsSql.setAvatar.run(user.id, mime, data, new Date().toISOString());
+    accountsSql.setAvatar.run(user.id, mime, data, new Date().toISOString(), crypto.randomBytes(18).toString("base64url"));
     return send(res, 200, { user: publicUser(user) });
   }
 
@@ -862,6 +929,31 @@ async function handleRecipes(req, res, parts, url, user) {
       return send(res, 201, toPublic(readStoredRecipe(id), user));
     }
     return send(res, 405, { error: "Method not allowed" });
+  }
+
+  // PUT /recipes/:id/image { image: <base64> } → set its picture
+  // DELETE /recipes/:id/image                 → remove it
+  if (parts.length === 3 && /^\d+$/.test(parts[1]) && parts[2] === "image") {
+    if (req.method !== "PUT" && req.method !== "DELETE") return send(res, 405, { error: "Method not allowed" });
+    const id = Number(parts[1]);
+    const recipe = readStoredRecipe(id);
+    if (!recipe || !canView(recipe, user)) return send(res, 404, { error: "Recipe not found" });
+    if (!canEdit(recipe, user)) {
+      return send(res, 403, { error: "Only the recipe's author or an admin can change its picture" });
+    }
+    if (req.method === "DELETE") {
+      recipesSql.deleteImage.run(id);
+      return send(res, 200, toPublic(readStoredRecipe(id), user));
+    }
+    const body = await readJsonBody(req, Math.ceil((MAX_RECIPE_IMAGE_BYTES * 4) / 3) + 1024);
+    const data = Buffer.from(asString(body?.image).replace(/^data:[^,]*,/, ""), "base64");
+    if (data.length === 0) return send(res, 400, { error: "No image was sent" });
+    if (data.length > MAX_RECIPE_IMAGE_BYTES) return send(res, 413, { error: "That picture is too large (3 MB max)" });
+    const mime = imageTypeOf(data);
+    if (!mime) return send(res, 400, { error: "Recipe pictures must be JPEG, PNG or WebP images" });
+    const token = crypto.randomBytes(18).toString("base64url");
+    recipesSql.setImage.run(id, token, mime, data, new Date().toISOString());
+    return send(res, 200, toPublic(readStoredRecipe(id), user));
   }
 
   // /recipes/:id
@@ -971,11 +1063,58 @@ async function handleSaved(req, res, parts, user) {
 // other people's saved lists (it comes back if it's published again).
 const readableOrNull = (recipe, user) => (canView(recipe, user) ? recipe : null);
 
+// ---------- who may call the API from a browser ----------
+//
+// Browsers only let a web page read another site's responses if that site
+// says so (CORS). The API used to say yes to every website; now only these
+// may — the recipe server's own website is the same origin and always may:
+//   - the Expo dev server on this computer (port 8081), for `expo start --web`
+//   - anything listed in ALLOWED_ORIGINS (comma-separated, e.g.
+//     ALLOWED_ORIGINS=https://recipes.example.com)
+// The phone app isn't a web page, so this doesn't affect it.
+const ALLOWED_ORIGINS = new Set([
+  ...["localhost", "127.0.0.1", ...localIPv4Addresses()].map((h) => `http://${h}:8081`),
+  ...(process.env.ALLOWED_ORIGINS || "").split(",").map((o) => o.trim()).filter(Boolean),
+]);
+
+function localIPv4Addresses() {
+  return Object.values(os.networkInterfaces())
+    .flat()
+    .filter((i) => i && i.family === "IPv4")
+    .map((i) => i.address);
+}
+
+// True if the request didn't come from a web page, or came from one that's
+// allowed. Adds the CORS headers for allowed cross-origin pages.
+function checkOrigin(req, res) {
+  const origin = req.headers.origin;
+  if (!origin) return true; // the phone app, curl, etc.
+  if (origin === `http://${req.headers.host}` || origin === `https://${req.headers.host}`) return true;
+  if (!ALLOWED_ORIGINS.has(origin)) return false;
+  res.setHeader("Access-Control-Allow-Origin", origin);
+  res.setHeader("Vary", "Origin");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization");
+  res.setHeader("Access-Control-Max-Age", "600");
+  return true;
+}
+
 async function handle(req, res) {
   const url = new URL(req.url, "http://localhost");
-  const parts = url.pathname.split("/").filter(Boolean); // e.g. ["recipes", "3"]
+  const parts = url.pathname.split("/").filter(Boolean); // e.g. ["api", "recipes", "3"]
 
+  // The admin dashboard (its own sign-in; admins only).
+  if (parts[0] === "admin") {
+    if (!checkOrigin(req, res)) return send(res, 403, { error: "Not allowed from this website" });
+    return admin.handleAdmin(req, res, parts, url);
+  }
+
+  // Everything that isn't the API is the website.
+  if (parts[0] !== "api") return website.serve(req, res, url.pathname);
+
+  if (!checkOrigin(req, res)) return send(res, 403, { error: "Not allowed from this website" });
   if (req.method === "OPTIONS") return send(res, 204);
+  parts.shift(); // the routes below are relative to /api
 
   if (parts.length === 1 && parts[0] === "health" && req.method === "GET") {
     return send(res, 200, { ok: true });
@@ -985,22 +1124,22 @@ async function handle(req, res) {
 
   if (parts[0] === "admin") return admin.handleAdmin(req, res, parts, url);
 
-  // GET /users/:id/avatar → the profile picture itself. Public (no sign-in)
-  // so image components can load it straight from the URL.
-  if (parts[0] === "users" && parts.length === 3 && /^\d+$/.test(parts[1]) && parts[2] === "avatar") {
+  // GET /api/avatars/:token        → a profile picture
+  // GET /api/recipe-images/:token  → a recipe's picture
+  // No sign-in needed (so image components can load them straight from the
+  // URL), but the random tokens are only handed out to signed-in people
+  // allowed to see them, so they can't be found by guessing.
+  if (parts[0] === "avatars" && parts.length === 2) {
     if (req.method !== "GET") return send(res, 405, { error: "Method not allowed" });
-    const avatar = accountsSql.avatarFor.get(Number(parts[1]));
-    if (!avatar) return send(res, 404, { error: "No profile picture" });
-    const data = Buffer.from(avatar.data);
-    res.writeHead(200, {
-      "Content-Type": avatar.mime,
-      "Content-Length": data.length,
-      "X-Content-Type-Options": "nosniff",
-      "Access-Control-Allow-Origin": "*",
-      // The URL changes (?v=) whenever the picture does, so it can be cached.
-      "Cache-Control": url.searchParams.has("v") ? "public, max-age=31536000, immutable" : "no-cache",
-    });
-    return res.end(data);
+    const avatar = /^[A-Za-z0-9_-]{16,64}$/.test(parts[1]) && accountsSql.avatarByToken.get(parts[1]);
+    if (!avatar) return send(res, 404, { error: "No such picture" });
+    return sendImage(res, avatar.mime, avatar.data, true);
+  }
+  if (parts[0] === "recipe-images" && parts.length === 2) {
+    if (req.method !== "GET") return send(res, 405, { error: "Method not allowed" });
+    const image = /^[A-Za-z0-9_-]{16,64}$/.test(parts[1]) && recipesSql.imageByToken.get(parts[1]);
+    if (!image) return send(res, 404, { error: "No such picture" });
+    return sendImage(res, image.mime, image.data, true);
   }
 
   if (parts[0] === "recipes") {
@@ -1266,7 +1405,9 @@ function startServer() {
     })
     .listen(PORT, () => {
       console.log(`Recipe server listening on http://0.0.0.0:${PORT}`);
+      console.log(`Website:         http://localhost:${PORT}/${website.isBuilt() ? "" : "  (not built yet — run npm run build:web)"}`);
       console.log(`Admin dashboard: http://localhost:${PORT}/admin`);
+      console.log(`API:             http://localhost:${PORT}/api/…`);
       console.log(`Accounts: ${ACCOUNTS_DB_PATH}`);
       console.log(`Recipes:  ${RECIPES_DB_PATH}`);
       console.log(`Saved:    ${SAVED_DB_PATH}`);

@@ -1,7 +1,10 @@
 import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import {  Dimensions,
+import {
+  Dimensions,
+  Image,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Switch,
@@ -13,7 +16,12 @@ import {  Dimensions,
 import { Alert } from "../lib/alert";
 import { KeyboardAwareScrollView } from "react-native-keyboard-aware-scroll-view";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { PickedImage, pickImage } from "../lib/pick-image";
+import { apiUrl } from "../lib/recipe-api";
 import { describeRecipeError, nextId, useRecipes } from "./recipe-store";
+
+// Recipe pictures are 4:3 and at most this wide (pixels).
+const RECIPE_IMAGE_WIDTH = 1200;
 
 // The fixed spot (distance from the top of the screen) every focused text box
 // should land at. Tweak this one number to move where boxes center — every
@@ -70,7 +78,9 @@ export default function RecipeFormScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const { id } = useLocalSearchParams<{ id?: string }>();
-  const { recipes, addRecipe, updateRecipe } = useRecipes();
+  const { recipes, addRecipe, updateRecipe, setRecipeImage } = useRecipes();
+  // undefined = picture unchanged, null = remove it, otherwise the new one.
+  const [imageChange, setImageChange] = useState<PickedImage | null | undefined>(undefined);
 
   const scrollRef = useRef<any>(null);
   const scrollOffsetRef = useRef(0);
@@ -104,6 +114,24 @@ export default function RecipeFormScreen() {
     ? recipes.find((r) => r.id === Number(id))
     : undefined;
   const isEditing = !!editingRecipe;
+
+  // What the picture box shows: a newly picked photo, nothing (if removed),
+  // or the recipe's current picture.
+  const previewUri =
+    imageChange === undefined
+      ? editingRecipe?.imageUrl
+        ? apiUrl(editingRecipe.imageUrl)
+        : null
+      : (imageChange?.uri ?? null);
+
+  const choosePicture = async (source: "library" | "camera") => {
+    try {
+      const picked = await pickImage({ source, aspect: [4, 3], maxWidth: RECIPE_IMAGE_WIDTH });
+      if (picked) setImageChange(picked);
+    } catch (err) {
+      Alert.alert("Couldn't use that picture", describeRecipeError(err));
+    }
+  };
 
   const [recipeName, setRecipeName] = useState("");
   const [ingredients, setIngredients] = useState<IngredientRow[]>([
@@ -369,17 +397,26 @@ export default function RecipeFormScreen() {
       const visibility = isPublic
         ? " It's published, so everyone can find it in Discover."
         : " It's private, so only you can see it.";
-      if (isEditing && editingRecipe) {
-        await updateRecipe(editingRecipe.id, draft);
-        Alert.alert("Updated!", `"${draft.name}" was updated.${visibility}`, [
-          { text: "OK", onPress: () => router.back() },
-        ]);
-      } else {
-        await addRecipe(draft);
-        Alert.alert("Saved!", `"${draft.name}" was saved.${visibility}`, [
-          { text: "OK", onPress: () => router.back() },
-        ]);
+      const saved =
+        isEditing && editingRecipe
+          ? await updateRecipe(editingRecipe.id, draft)
+          : await addRecipe(draft);
+
+      // The picture is uploaded separately, once the recipe exists.
+      let pictureNote = "";
+      if (imageChange !== undefined) {
+        try {
+          await setRecipeImage(saved.id, imageChange ? imageChange.base64 : null);
+        } catch (err) {
+          pictureNote = `\n\nThe picture couldn't be ${imageChange ? "uploaded" : "removed"}: ${describeRecipeError(err)}`;
+        }
       }
+
+      Alert.alert(
+        isEditing ? "Updated!" : "Saved!",
+        `"${draft.name}" was ${isEditing ? "updated" : "saved"}.${visibility}${pictureNote}`,
+        [{ text: "OK", onPress: () => router.back() }],
+      );
     } catch (err) {
       Alert.alert("Save failed", describeRecipeError(err));
     } finally {
@@ -410,6 +447,49 @@ export default function RecipeFormScreen() {
             onChangeText={setRecipeName}
             onFocus={handleInputFocus}
           />
+        </View>
+
+        {/* Picture (optional) */}
+        <View style={styles.section}>
+          <Text style={styles.label}>Picture (optional)</Text>
+          {previewUri ? (
+            <>
+              <Image source={{ uri: previewUri }} style={styles.imagePreview} />
+              <View style={styles.imageButtons}>
+                <TouchableOpacity style={styles.imageButton} onPress={() => choosePicture("library")}>
+                  <Text style={styles.imageButtonText}>Change</Text>
+                </TouchableOpacity>
+                {Platform.OS !== "web" && (
+                  <TouchableOpacity style={styles.imageButton} onPress={() => choosePicture("camera")}>
+                    <Text style={styles.imageButtonText}>Take Photo</Text>
+                  </TouchableOpacity>
+                )}
+                <TouchableOpacity
+                  style={[styles.imageButton, styles.imageRemoveButton]}
+                  onPress={() => setImageChange(null)}
+                >
+                  <Text style={styles.imageRemoveText}>Remove</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          ) : (
+            <View style={styles.imageButtons}>
+              <TouchableOpacity
+                style={[styles.imageButton, styles.imageAddButton]}
+                onPress={() => choosePicture("library")}
+              >
+                <Text style={styles.imageButtonText}>+ Add a Picture</Text>
+              </TouchableOpacity>
+              {Platform.OS !== "web" && (
+                <TouchableOpacity
+                  style={[styles.imageButton, styles.imageAddButton]}
+                  onPress={() => choosePicture("camera")}
+                >
+                  <Text style={styles.imageButtonText}>Take Photo</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
         </View>
 
         {/* Ingredients */}
@@ -669,6 +749,43 @@ export default function RecipeFormScreen() {
 }
 
 const styles = StyleSheet.create({
+  imagePreview: {
+    width: "100%",
+    aspectRatio: 4 / 3,
+    borderRadius: 12,
+    backgroundColor: "#E0D5C7",
+  },
+  imageButtons: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 10,
+  },
+  imageButton: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "#D97B4F",
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  imageAddButton: {
+    borderStyle: "dashed",
+    paddingVertical: 18,
+    marginTop: 0,
+  },
+  imageButtonText: {
+    color: "#D97B4F",
+    fontWeight: "700",
+    fontSize: 15,
+  },
+  imageRemoveButton: {
+    borderColor: "#B04A3B",
+  },
+  imageRemoveText: {
+    color: "#B04A3B",
+    fontWeight: "700",
+    fontSize: 15,
+  },
   safeArea: {
     flex: 1,
     backgroundColor: "#FAF7F2",

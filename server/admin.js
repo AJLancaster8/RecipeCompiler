@@ -31,6 +31,10 @@ const HIDDEN_COLUMNS = {
   "accounts.users.password_hash": () => "•••••• (hidden)",
   "accounts.sessions.token_hash": (v) => `${String(v).slice(0, 8)}…`,
   "accounts.avatars.data": (v) => `<image, ${(v.length / 1024).toFixed(1)} KB>`,
+  "recipes.recipe_images.data": (v) => `<image, ${(v.length / 1024).toFixed(1)} KB>`,
+  // Knowing the token is what lets someone load the picture, so don't show it.
+  "recipes.recipe_images.token": (v) => `${String(v).slice(0, 4)}…`,
+  "accounts.avatars.token": (v) => `${String(v).slice(0, 4)}…`,
 };
 
 const ADMIN_HTML_PATH = path.join(__dirname, "admin.html");
@@ -307,6 +311,10 @@ function createAdmin({ databases, dataDir, userFromRequest, send }) {
       "Cache-Control": "no-store",
       "X-Frame-Options": "DENY",
       "Referrer-Policy": "no-referrer",
+      "X-Content-Type-Options": "nosniff",
+      // The page's own script and styles are inline; it loads nothing else.
+      "Content-Security-Policy":
+        "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
     });
     res.end(html);
   }

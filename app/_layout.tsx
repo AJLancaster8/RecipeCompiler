@@ -71,6 +71,7 @@ function AppStack() {
               }}
             />
             <Stack.Screen name="account" options={{ title: "My Account" }} />
+            <Stack.Screen name="recipe" options={{ title: "Recipe" }} />
             <Stack.Screen name="discover" options={{ title: "Discover Recipes" }} />
             <Stack.Screen name="saved" options={{ title: "Saved Recipes" }} />
             <Stack.Screen name="new-recipe" options={{ title: "New Recipe" }} />

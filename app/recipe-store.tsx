@@ -36,6 +36,8 @@ export type Recipe = {
   canEdit: boolean; // true if the signed-in user may edit/delete it (creator or admin)
   authorId: number; // users.id of the account that created it
   authorName: string | null; // that account's username (null if unknown)
+  authorAvatarUrl?: string | null; // server path of their profile picture, if any
+  imageUrl?: string | null; // server path of the recipe's picture, if any
   isPublic: boolean; // true if published to Discover
   isSaved: boolean; // true if the signed-in user has saved it
   savedAt?: string; // when they saved it (only in the Saved Recipes list)
@@ -108,6 +110,8 @@ type RecipeContextType = {
   addRecipe: (recipe: RecipeDraft) => Promise<Recipe>;
   updateRecipe: (id: number, recipe: RecipeDraft) => Promise<Recipe>;
   deleteRecipe: (id: number) => Promise<void>;
+  // Sets (base64 JPEG/PNG/WebP) or removes (null) a recipe's picture.
+  setRecipeImage: (id: number, base64: string | null) => Promise<Recipe>;
   // Records locally that a recipe was saved/unsaved (the server call is
   // made by SaveButton).
   markSaved: (id: number, saved: boolean) => void;
@@ -218,6 +222,19 @@ export function RecipeProvider({ children }: { children: ReactNode }) {
     return updated;
   };
 
+  const setRecipeImage = async (id: number, base64: string | null) => {
+    const updated =
+      base64 === null
+        ? await recipeApi.removeImage<Recipe>(id)
+        : await recipeApi.setImage<Recipe>(id, base64);
+    setRecipesState((prev) => {
+      const next = prev.map((r) => (r.id === id ? updated : r));
+      writeCache(userId, next);
+      return next;
+    });
+    return updated;
+  };
+
   const deleteRecipe = async (id: number) => {
     try {
       await recipeApi.remove(id);
@@ -254,6 +271,7 @@ export function RecipeProvider({ children }: { children: ReactNode }) {
         addRecipe,
         updateRecipe,
         deleteRecipe,
+        setRecipeImage,
         markSaved,
         refresh,
         loading,

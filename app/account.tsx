@@ -1,5 +1,3 @@
-import * as ImageManipulator from "expo-image-manipulator";
-import * as ImagePicker from "expo-image-picker";
 import { useState } from "react";
 import {
   ActivityIndicator,
@@ -14,55 +12,10 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Avatar } from "../components/avatar";
 import { Alert } from "../lib/alert";
 import { useAuth } from "../lib/auth";
+import { pickImage } from "../lib/pick-image";
 import { describeRecipeError, useRecipes } from "./recipe-store";
 
 const AVATAR_SIZE = 512; // pixels; plenty for a profile picture, small to upload
-
-// Lets the user pick (or take) a photo, then crops it to a centred square,
-// shrinks it and returns it as base64 JPEG. Null if they cancelled.
-async function pickProfilePicture(source: "library" | "camera"): Promise<string | null> {
-  if (source === "camera") {
-    const permission = await ImagePicker.requestCameraPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert("Camera access needed", "Allow camera access in Settings to take a profile picture.");
-      return null;
-    }
-  }
-  const options: ImagePicker.ImagePickerOptions = {
-    mediaTypes: ["images"],
-    allowsEditing: true, // lets phones crop it themselves first
-    aspect: [1, 1],
-    quality: 1,
-  };
-  const result =
-    source === "camera"
-      ? await ImagePicker.launchCameraAsync(options)
-      : await ImagePicker.launchImageLibraryAsync(options);
-  if (result.canceled || result.assets.length === 0) return null;
-
-  const asset = result.assets[0];
-  const image = ImageManipulator.ImageManipulator.manipulate(asset.uri);
-  // The web picker (and some Androids) don't crop, so make it square here.
-  if (asset.width && asset.height && asset.width !== asset.height) {
-    const side = Math.min(asset.width, asset.height);
-    image.crop({
-      originX: Math.floor((asset.width - side) / 2),
-      originY: Math.floor((asset.height - side) / 2),
-      width: side,
-      height: side,
-    });
-  }
-  if (!asset.width || Math.min(asset.width, asset.height) > AVATAR_SIZE) {
-    image.resize({ width: AVATAR_SIZE });
-  }
-  const rendered = await image.renderAsync();
-  const saved = await rendered.saveAsync({
-    format: ImageManipulator.SaveFormat.JPEG,
-    compress: 0.8,
-    base64: true,
-  });
-  return saved.base64 ?? null;
-}
 
 const formatDate = (iso: string) =>
   new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
@@ -78,10 +31,10 @@ export default function AccountScreen() {
 
   const changePhoto = async (source: "library" | "camera") => {
     try {
-      const base64 = await pickProfilePicture(source);
-      if (!base64) return;
+      const picked = await pickImage({ source, aspect: [1, 1], maxWidth: AVATAR_SIZE });
+      if (!picked) return;
       setBusy("photo");
-      await setAvatar(base64);
+      await setAvatar(picked.base64);
     } catch (err) {
       Alert.alert("Couldn't update your picture", describeRecipeError(err));
     } finally {

@@ -1,4 +1,5 @@
 import Constants from "expo-constants";
+import { Platform } from "react-native";
 
 // Where the recipe server lives. Set EXPO_PUBLIC_API_URL (e.g. in a .env
 // file: EXPO_PUBLIC_API_URL=http://192.168.1.20:3000) for a real server.
@@ -7,6 +8,11 @@ import Constants from "expo-constants";
 function resolveBaseUrl(): string {
   const fromEnv = process.env.EXPO_PUBLIC_API_URL;
   if (fromEnv) return fromEnv.replace(/\/+$/, "");
+  // The website build is served by the recipe server itself, so it talks to
+  // whichever server it was loaded from.
+  if (Platform.OS === "web" && !__DEV__ && typeof window !== "undefined") {
+    return window.location.origin;
+  }
   const hostUri = Constants.expoConfig?.hostUri; // e.g. "192.168.1.20:8081"
   const host = hostUri ? hostUri.split(":")[0] : "localhost";
   return `http://${host}:3000`;
@@ -35,7 +41,8 @@ export type User = {
   avatarUrl: string | null;
 };
 
-// A full URL for a path on the recipe server (e.g. a profile picture).
+// A full URL for a path the server handed out (e.g. a picture's, which
+// already starts with /api).
 export function apiUrl(path: string): string {
   return `${API_BASE_URL}${path}`;
 }
@@ -72,7 +79,8 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   let res: Response;
   try {
-    res = await fetch(`${API_BASE_URL}${path}`, {
+    // Every data route lives under /api on the server.
+    res = await fetch(`${API_BASE_URL}/api${path}`, {
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -119,10 +127,16 @@ export const recipeApi = {
   list: <T>() => request<T[]>("GET", "/recipes"),
   // Every published recipe, from everyone (the Discover list).
   listPublic: <T>() => request<T[]>("GET", "/recipes?scope=public"),
+  // One recipe (yours, or anyone's published one).
+  get: <T>(id: number) => request<T>("GET", `/recipes/${id}`),
   create: <T>(recipe: RecipeInput) => request<T>("POST", "/recipes", recipe),
   update: <T>(id: number, recipe: RecipeInput) =>
     request<T>("PUT", `/recipes/${id}`, recipe),
   remove: (id: number) => request<void>("DELETE", `/recipes/${id}`),
+  // `base64` is JPEG/PNG/WebP data (3 MB max). Both return the updated recipe.
+  setImage: <T>(id: number, base64: string) =>
+    request<T>("PUT", `/recipes/${id}/image`, { image: base64 }),
+  removeImage: <T>(id: number) => request<T>("DELETE", `/recipes/${id}/image`),
 };
 
 export type DiscoverPage<T> = {

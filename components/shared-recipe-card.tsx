@@ -1,10 +1,13 @@
-import { StyleSheet, Text, View } from "react-native";
+import { useRouter } from "expo-router";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import type { Recipe } from "../app/recipe-store";
 import { RecipeDetails } from "./recipe-details";
+import { RecipeImage } from "./recipe-image";
 import { SaveButton } from "./save-button";
 
 // A recipe card showing who made it, with a Save toggle. Used by Discover
 // and Saved Recipes (your own recipes are edited from the home screen).
+// Tapping it opens the recipe on its own page.
 export function SharedRecipeCard({
   recipe,
   onSavedChange,
@@ -12,8 +15,15 @@ export function SharedRecipeCard({
   recipe: Recipe;
   onSavedChange: (saved: boolean) => void;
 }) {
+  const router = useRouter();
   return (
-    <View style={styles.card}>
+    <Pressable
+      style={({ pressed }) => [styles.card, pressed && styles.pressed]}
+      onPress={() => router.push(`/recipe?id=${recipe.id}`)}
+      accessibilityRole="button"
+      accessibilityHint="Opens the full recipe"
+    >
+      <RecipeImage imageUrl={recipe.imageUrl} style={{ aspectRatio: 16 / 9, marginBottom: 12 }} />
       <View style={styles.header}>
         <Text style={styles.title}>{recipe.name}</Text>
         <SaveButton recipeId={recipe.id} saved={recipe.isSaved} onChange={onSavedChange} />
@@ -23,7 +33,8 @@ export function SharedRecipeCard({
         {!recipe.isPublic ? "  ·  Private" : ""}
       </Text>
       <RecipeDetails recipe={recipe} />
-    </View>
+      <Text style={styles.openHint}>View full recipe ›</Text>
+    </Pressable>
   );
 }
 
@@ -36,6 +47,15 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 12,
     width: "100%",
+  },
+  pressed: {
+    opacity: 0.7,
+  },
+  openHint: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#D97B4F",
+    marginTop: 4,
   },
   header: {
     flexDirection: "row",

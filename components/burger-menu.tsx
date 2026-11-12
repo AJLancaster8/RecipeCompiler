@@ -1,6 +1,6 @@
 import { Href, useRouter } from "expo-router";
 import { useState } from "react";
-import { Modal, Pressable, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Modal, Platform, Pressable, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 type MenuItem = { label: string; description: string; href: Href };
@@ -92,6 +92,14 @@ const styles = StyleSheet.create({
     height: 20,
     justifyContent: "space-between",
     paddingVertical: 1,
+    // Same footprint as the ← back button on the other screens, so the
+    // "My Recipes" title starts where their titles do. (iOS centres titles,
+    // so it needs nothing.)
+    ...Platform.select({
+      android: { marginRight: 30 }, // back arrow area ends 72dp in; burger starts at 16dp
+      web: { marginHorizontal: 11 }, // back button: 11 + 24px icon + 3 + 11
+      default: {},
+    }),
   },
   bar: {
     height: 3,

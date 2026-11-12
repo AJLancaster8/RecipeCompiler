@@ -2,6 +2,7 @@
   "name": "recipecompiler",
   "main": "expo-router/entry",
   "version": "1.0.0",
+  "license": "MIT",
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
@@ -11,7 +12,8 @@
     "server": "node --disable-warning=ExperimentalWarning server/index.js",
     "make-admin": "node --disable-warning=ExperimentalWarning server/index.js make-admin",
     "seed-examples": "node --disable-warning=ExperimentalWarning server/index.js seed-examples",
-    "reset-password": "node --disable-warning=ExperimentalWarning server/index.js reset-password"
+    "reset-password": "node --disable-warning=ExperimentalWarning server/index.js reset-password",
+    "build:web": "expo export --platform web"
   },
   "dependencies": {
     "@react-navigation/native": "^7.1.8",

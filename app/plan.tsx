@@ -1,6 +1,7 @@
 import { useLocalSearchParams, useNavigation } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
-import {  ScrollView,
+import {
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -54,10 +55,14 @@ function formatAmounts(amounts: { amount: number; unit: string }[]): string {
 export default function PlanScreen() {
   const { id } = useLocalSearchParams<{ id?: string }>();
   const navigation = useNavigation();
-  const { plans, updatePlan } = usePlans();
+  const { plans, updatePlan, tempPlan, endTempPlan, saveTempPlan } = usePlans();
+  // A "Make This" session lives only in memory, outside the saved plans.
+  const isTemp = !!tempPlan && tempPlan.id === Number(id);
 
   const plan = useMemo(() => {
-    const found = plans.find((p) => p.id === Number(id));
+    const found =
+      plans.find((p) => p.id === Number(id)) ??
+      (tempPlan && tempPlan.id === Number(id) ? tempPlan : undefined);
     if (!found) return found;
     // Guard against older saved plans from before activeSteps/scheduledStartAt existed
     return {
@@ -65,7 +70,7 @@ export default function PlanScreen() {
       activeSteps: found.activeSteps || [],
       scheduledStartAt: found.scheduledStartAt || Date.now(),
     };
-  }, [plans, id]);
+  }, [plans, tempPlan, id]);
 
   // Ask for notification permission once, up front, so the first "Mark In
   // Progress" tap doesn't stall on a permission prompt.
@@ -95,7 +100,10 @@ export default function PlanScreen() {
     return (
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.container}>
-          <Text style={styles.emptyText}>This plan couldn't be found.</Text>
+          <Text style={styles.emptyText}>
+            This plan couldn&apos;t be found. (A &quot;Make This&quot; session ends when you finish it or
+            close the app.)
+          </Text>
         </View>
       </SafeAreaView>
     );
@@ -179,9 +187,52 @@ export default function PlanScreen() {
     await updatePlan({ ...plan, ingredients: updatedIngredients });
   };
 
+  const finishTemp = () =>
+    Alert.alert(
+      "Finish cooking?",
+      "This session isn't saved, so it will be cleared and any running timers stopped.",
+      [
+        { text: "Keep Cooking", style: "cancel" },
+        {
+          text: "Finish",
+          style: "destructive",
+          onPress: async () => {
+            await endTempPlan();
+            navigation.goBack();
+          },
+        },
+      ],
+    );
+
+  const keepTemp = async () => {
+    try {
+      await saveTempPlan();
+      Alert.alert("Plan saved!", `"${plan.name}" is now in Saved Plans.`);
+    } catch {
+      Alert.alert("Save failed", "There was a problem saving this plan to your device.");
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.container}>
+        {isTemp && (
+          <View style={styles.tempBanner}>
+            <Text style={styles.tempTitle}>Temporary session</Text>
+            <Text style={styles.tempText}>
+              Not in your Saved Plans. It stays here while the app is open, until you finish it.
+            </Text>
+            <View style={styles.tempButtons}>
+              <TouchableOpacity style={styles.tempSave} onPress={keepTemp}>
+                <Text style={styles.tempSaveText}>Save as Plan</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.tempFinish} onPress={finishTemp}>
+                <Text style={styles.tempFinishText}>Finish</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
         <Text style={styles.sectionTitle}>Shopping List</Text>
         {plan.ingredients.map((ing, idx) => (
           <TouchableOpacity
@@ -312,6 +363,52 @@ export default function PlanScreen() {
 }
 
 const styles = StyleSheet.create({
+  tempBanner: {
+    backgroundColor: "#F3E4D3",
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+  },
+  tempTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#8A5A2E",
+  },
+  tempText: {
+    fontSize: 13,
+    color: "#6B5A48",
+    marginTop: 2,
+  },
+  tempButtons: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 12,
+  },
+  tempSave: {
+    flex: 1,
+    backgroundColor: "#D97B4F",
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  tempSaveText: {
+    color: "#FFFFFF",
+    fontWeight: "700",
+    fontSize: 15,
+  },
+  tempFinish: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "#B04A3B",
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  tempFinishText: {
+    color: "#B04A3B",
+    fontWeight: "700",
+    fontSize: 15,
+  },
   safeArea: {
     flex: 1,
     backgroundColor: "#FAF7F2",

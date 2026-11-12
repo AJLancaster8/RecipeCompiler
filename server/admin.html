@@ -410,7 +410,7 @@
   }
 
   async function enter() {
-    const { user } = await api("GET", "/auth/me");
+    const { user } = await api("GET", "/api/auth/me");
     if (user.role !== "admin") {
       setToken(null);
       return showLogin(`${user.username} isn't an admin. Run "npm run make-admin -- ${user.username}" on the server.`);
@@ -427,7 +427,7 @@
     $("login-btn").disabled = true;
     $("login-error").textContent = "";
     try {
-      const { token: t } = await api("POST", "/auth/login", { login: $("login-name").value.trim(), password: $("login-pass").value });
+      const { token: t } = await api("POST", "/api/auth/login", { login: $("login-name").value.trim(), password: $("login-pass").value });
       setToken(t);
       $("login-pass").value = "";
       await enter();
@@ -439,7 +439,7 @@
   });
 
   $("logout").addEventListener("click", async () => {
-    try { await api("POST", "/auth/logout"); } catch {}
+    try { await api("POST", "/api/auth/logout"); } catch {}
     setToken(null);
     showLogin();
   });

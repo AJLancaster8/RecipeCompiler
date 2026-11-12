@@ -1,6 +1,8 @@
 import { useRouter } from "expo-router";
 import {
-  ActivityIndicator,  RefreshControl,
+  ActivityIndicator,
+  Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,6 +12,7 @@ import {
 import { Alert } from "../lib/alert";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { RecipeDetails } from "../components/recipe-details";
+import { RecipeImage } from "../components/recipe-image";
 import { SaveButton } from "../components/save-button";
 import { usePlans } from "./plan-store";
 import { describeRecipeError, Recipe, useRecipes } from "./recipe-store";
@@ -46,8 +49,16 @@ export default function HomeScreen() {
     );
   };
 
+  // Tapping a card opens the recipe on its own page.
   const renderCard = (r: Recipe) => (
-    <View key={r.id} style={styles.recipeCard}>
+    <Pressable
+      key={r.id}
+      style={({ pressed }) => [styles.recipeCard, pressed && { opacity: 0.7 }]}
+      onPress={() => router.push(`/recipe?id=${r.id}`)}
+      accessibilityRole="button"
+      accessibilityHint="Opens the full recipe"
+    >
+      <RecipeImage imageUrl={r.imageUrl} style={{ aspectRatio: 16 / 9, marginBottom: 12 }} />
       <View style={styles.recipeCardHeader}>
         <Text style={styles.recipeCardTitle}>{r.name}</Text>
         <View style={styles.cardActions}>
@@ -75,7 +86,8 @@ export default function HomeScreen() {
       </Text>
 
       <RecipeDetails recipe={r} />
-    </View>
+      <Text style={styles.openHint}>View full recipe ›</Text>
+    </Pressable>
   );
 
   return (
@@ -243,6 +255,12 @@ const styles = StyleSheet.create({
   cardActions: {
     flexDirection: "row",
     gap: 16,
+  },
+  openHint: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#D97B4F",
+    marginTop: 4,
   },
   editText: {
     fontSize: 13,
