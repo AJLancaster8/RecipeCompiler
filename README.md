@@ -11,6 +11,7 @@ An app for saving recipes and **compiling** several of them into one timed cooki
 - Keep a recipe private or publish it for everyone.
 - Open any recipe on its own page with its picture, author, ingredients, steps and total time.
 - Each recipe gets its own colour, which it keeps across the compile, plan and timeline screens.
+  ![alt text](image-2.png)
 
 ### Discover and saving
 
